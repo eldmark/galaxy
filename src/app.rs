@@ -1,5 +1,6 @@
 //! Bucle principal: une simulación, cámara, escena (LOD + culling), HUD y entrada.
-use crate::geometry::{Mesh, SphereLods, load_obj, ring_mesh};
+use crate::geometry::{Mesh, SphereLods, ring_mesh};
+use crate::shipmodel::ShipModel;
 use crate::hud::{HudLayout, HudState, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
@@ -117,15 +118,14 @@ pub struct Scene {
     levels: Vec<usize>,
     ring: Mesh,
     ring_shader: Box<dyn FragmentShader>,
-    ship: Mesh,
+    ship: ShipModel,
     ship_shader: Box<dyn FragmentShader>,
 }
 
 impl Scene {
     pub fn new() -> Self {
         let bodies = solar_system();
-        let mut ship = load_obj("assets/models/ship.obj").expect("falta assets/models/ship.obj");
-        ship.update_bounds();
+        let ship = ShipModel::load("assets/models/ship.obj").expect("falta assets/models/ship.obj");
         Self {
             sky: SkyBox::new(1024, 0.0),
             shaders: bodies.iter().map(|b| shader_for(b.kind)).collect(),
@@ -188,18 +188,20 @@ impl Scene {
         let rel = (sim.ship.position - eye).to_f32();
         let ship_model = Mat4::translation(rel) * sim.ship.orientation.to_mat4();
         let sun_dir = (-sim.ship.position).normalized().to_f32();
-        calls.push(DrawCall {
-            mesh: &self.ship,
-            model: ship_model,
-            shader: self.ship_shader.as_ref(),
-            uniforms: Uniforms { light_dir: sun_dir, time, detail: 1.0, model: ship_model },
-        });
+        let ship_uniforms = Uniforms { light_dir: sun_dir, time, detail: 1.0, model: ship_model };
+        calls.extend(self.ship.draw_calls(ship_model, sim.ship.gear, self.ship_shader.as_ref(), ship_uniforms));
         render_scene(fb, view, proj, &calls, opts, stats);
     }
 }
 
+/// Velocidad respecto del cuerpo; en descenso se mide contra el SUELO (descuenta su rotación).
 fn speed_relative(sim: &Sim, idx: usize) -> f64 {
-    (sim.ship.velocity - sim.bodies[idx].velocity(sim.t)).length()
+    let b = &sim.bodies[idx];
+    let mut v = sim.ship.velocity - b.velocity(sim.t);
+    if sim.ship.mode == crate::ship::NavMode::Descent {
+        v = v - b.spin_velocity(sim.ship.position - b.position(sim.t));
+    }
+    v.length()
 }
 
 fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, show_help: bool, opts: &RenderOptions, lod_on: bool) -> HudState<'a> {
