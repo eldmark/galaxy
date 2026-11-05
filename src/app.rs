@@ -114,7 +114,7 @@ pub fn new_sim() -> Sim {
 pub struct Scene {
     sky: SkyBox,
     shaders: Vec<Box<dyn FragmentShader>>,
-    lods: SphereLods,
+    lods: Vec<SphereLods>,
     levels: Vec<usize>,
     ring: Mesh,
     ring_shader: Box<dyn FragmentShader>,
@@ -129,7 +129,7 @@ impl Scene {
         Self {
             sky: SkyBox::new(1024, 0.0),
             shaders: bodies.iter().map(|b| shader_for(b.kind)).collect(),
-            lods: SphereLods::new(5, &|_| 0.0),
+            lods: bodies.iter().map(|b| crate::relief::displaced_lods(b.kind, 5)).collect(),
             levels: vec![0; bodies.len()],
             ring: ring_mesh(1.3, 2.1, 96),
             ring_shader: shader_for_ring(),
@@ -147,14 +147,17 @@ impl Scene {
         self.sky.paint(fb, view);
         stats.ms_sky += t_sky.elapsed().as_secs_f32() * 1000.0;
 
-        let max_level = self.lods.levels.len() - 1;
+        let max_level = self.lods[0].levels.len() - 1;
         let mut dists = Vec::with_capacity(sim.bodies.len());
         for (i, b) in sim.bodies.iter().enumerate() {
             let dist = (b.position(sim.t) - eye).length() as f32;
             dists.push(dist);
             self.levels[i] = if lod_on {
-                self.lods
-                    .select_with_hysteresis(self.levels[i], dist, b.radius as f32, FOV_Y, fb.height as f32, LOD_MARGIN)
+                // Histéresis para no parpadear + cota por el relieve (la silueta deformada exige más detalle).
+                let (r, h) = (b.radius as f32, fb.height as f32);
+                let base = self.lods[i].select_with_hysteresis(self.levels[i], dist, r, FOV_Y, h, LOD_MARGIN);
+                let relief = self.lods[i].select_with_relief(dist, r, FOV_Y, h, crate::relief::max_amplitude(b.kind));
+                base.max(relief)
             } else {
                 max_level
             };
@@ -168,7 +171,7 @@ impl Scene {
             let coverage = b.radius as f32 / dists[i].max(1.0);
             let detail = if lod_on { (coverage * 8.0).clamp(0.15, 1.0) } else { 1.0 };
             calls.push(DrawCall {
-                mesh: &self.lods.levels[self.levels[i]],
+                mesh: &self.lods[i].levels[self.levels[i]],
                 model,
                 shader: self.shaders[i].as_ref(),
                 uniforms: Uniforms { light_dir: light, time, detail, model },
