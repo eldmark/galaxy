@@ -120,10 +120,31 @@ impl Body {
     }
 }
 
-/// Altura de la superficie (m desde el centro) en la dirección `dir` (unitaria, marco del mundo).
-/// Por ahora una esfera lisa; el terreno la reemplazará (la colisión y el aterrizaje la usan).
-pub fn surface_height(body: &Body, _dir: DVec3) -> f64 {
-    body.radius
+/// Altura de la superficie (m desde el centro) en la dirección `dir` (unitaria) expresada en el
+/// marco FIJO al cuerpo (el de `relief::height` y el `p_local` de los shaders):
+/// `radius * (1 + relief::height(kind, dir))`.
+///
+/// Decisión: esta función no recibe el tiempo, y la rotación propia del cuerpo cambia qué punto del
+/// terreno queda bajo una dirección del mundo. Por eso hay dos versiones: esta (marco fijo) y
+/// [`surface_height_at`] (dirección en marco del mundo + instante), que es la que usan física y piloto.
+pub fn surface_height(body: &Body, dir: DVec3) -> f64 {
+    let d = dir.to_f32();
+    body.radius * (1.0 + crate::relief::height(body.kind, d) as f64)
+}
+
+/// Altura de la superficie en la dirección `dir_world` (unitaria, marco del mundo) en el instante `t`.
+pub fn surface_height_at(body: &Body, t: f64, dir_world: DVec3) -> f64 {
+    surface_height(body, body.world_to_fixed(t, dir_world))
+}
+
+/// Altitud real de `pos` sobre el terreno del cuerpo (usa el relieve), m.
+pub fn terrain_altitude(body: &Body, t: f64, pos: DVec3) -> f64 {
+    let rel = pos - body.position(t);
+    let d = rel.length();
+    if d < 1e-9 {
+        return -body.radius;
+    }
+    d - surface_height_at(body, t, rel * (1.0 / d))
 }
 
 /// Altitud de `ship_pos` sobre la esfera (radio) de un cuerpo en `body_pos`.

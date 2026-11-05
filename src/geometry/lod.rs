@@ -55,6 +55,31 @@ impl SphereLods {
         if e.is_finite() { e } else { f32::INFINITY }
     }
 
+    /// Error de silueta EXTRA (px) por muestrear el relieve solo en los vértices del nivel `level`.
+    /// `amp` es la amplitud relativa (`relief::max_amplitude`). Modelo medido en `relief::tests`:
+    /// el relieve no resuelto por una arista de ángulo `a` vale ~ `amp * min(2, 10 * a)` (en radios).
+    pub fn relief_error_px(&self, level: usize, amp: f32, distance: f32, radius: f32, fov_y: f32, viewport_h: f32) -> f32 {
+        let scale = viewport_h / (2.0 * distance * (fov_y * 0.5).tan());
+        let e = radius * amp * (10.0 * self.max_edge_angle[level]).min(2.0) * scale;
+        if e.is_finite() { e } else { f32::INFINITY }
+    }
+
+    /// Como [`select`](Self::select) pero sumando el error de relieve (`amp` = amplitud relativa
+    /// del cuerpo): sube de nivel cuando el relieve añadiría silueta rota. Con `amp = 0` equivale a `select`.
+    pub fn select_with_relief(&self, distance: f32, radius: f32, fov_y: f32, viewport_h: f32, amp: f32) -> usize {
+        let last = self.levels.len().saturating_sub(1);
+        if !self.valid(distance, radius, fov_y, viewport_h) {
+            return last;
+        }
+        (0..self.levels.len())
+            .find(|&l| {
+                self.error_px(l, distance, radius, fov_y, viewport_h)
+                    + self.relief_error_px(l, amp, distance, radius, fov_y, viewport_h)
+                    <= MAX_ERROR_PX
+            })
+            .unwrap_or(last)
+    }
+
     fn valid(&self, distance: f32, radius: f32, fov_y: f32, viewport_h: f32) -> bool {
         distance > radius.max(0.0)
             && distance.is_finite()
