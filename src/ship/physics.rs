@@ -272,8 +272,15 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
     let cap = speed_cap(s.mode, input.boost, alt);
     let sp = u.length();
     if sp > cap {
-        let f = cap / sp;
-        u = u * (1.0 - (1.0 - f) * expk(dt, 1.5)); // tope suave: sin tirones al soltar el boost
+        // tope firme pero sin tirones: el exceso se recorta con desaceleración acotada (CAP_DECEL)
+        if s.mode == NavMode::Cruise {
+            let new_sp = (sp - CAP_DECEL * dt).max(cap);
+            u = u * (new_sp / sp);
+        } else {
+            // en local (Orbit/Descent) se mantiene el tope suave original: el aterrizaje depende de él
+            let f = cap / sp;
+            u = u * (1.0 - (1.0 - f) * expk(dt, 1.5));
+        }
     }
 
     // --- integración (semi-implícita) en el marco ---

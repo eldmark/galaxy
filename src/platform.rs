@@ -29,8 +29,14 @@ pub struct UiInput {
     pub land_auto: bool,
     /// AÑADIDO. Teclas 1..6 -> Some(0..=5).
     pub select_body: Option<usize>,
-    /// AÑADIDO. Delta de ratón (píxeles de ventana) acumulado en el cuadro mientras el botón derecho está pulsado.
+    /// AÑADIDO. Delta de ratón (píxeles de ventana) acumulado en el cuadro mientras el botón derecho está pulsado
+    /// (mirada libre de la cámara; NO gira la nave).
     pub mouse_look: (f32, f32),
+    /// AÑADIDO. Botón derecho pulsado: mirada libre (`CameraRig::update(.., free_look)`).
+    pub free_look: bool,
+    /// AÑADIDO. Modo "el ratón timonea la nave" activo (se alterna con M o el botón central).
+    /// El delta ya va incluido en `ship.rotate` (via `map_keys`).
+    pub mouse_steer: bool,
     /// AÑADIDO. Rueda del ratón (positivo = hacia delante).
     pub scroll: f32,
 }
@@ -54,9 +60,11 @@ pub struct KeyState {
     pub c: bool,
     pub shift: bool,
     pub ctrl: bool,
-    /// Botón derecho pulsado.
+    /// Botón derecho pulsado (mirada libre de la cámara; no gira la nave).
     pub right_mouse: bool,
-    /// Delta del ratón en píxeles de ventana (solo cuenta con `right_mouse`).
+    /// Modo "ratón timonea" activo (M / botón central): el delta del ratón gira la nave.
+    pub mouse_steer: bool,
+    /// Delta del ratón en píxeles de ventana.
     pub mouse_delta: (f32, f32),
 }
 
@@ -69,6 +77,7 @@ pub const MOUSE_FULL_TURN_PX: f32 = 12.0;
 
 /// Mapea teclas a `ship::Input`. Opuestos se cancelan; todos los valores quedan en [-1, 1].
 /// Convención: thrust.z +1 = adelante (W), thrust.x +1 = derecha (D), thrust.y +1 = arriba (E).
+/// El botón derecho NO gira la nave (mirada libre); el ratón solo timonea con `mouse_steer`.
 /// Convención de `ship::Input` (la que usa la física): rotate.x +1 = morro arriba (flecha arriba / ratón arriba),
 /// rotate.y +1 = guiñada a la DERECHA (flecha derecha / ratón a la derecha), rotate.z +1 = alabeo a la DERECHA (C).
 pub fn map_keys(k: &KeyState) -> Input {
@@ -76,7 +85,8 @@ pub fn map_keys(k: &KeyState) -> Input {
     let mut pitch = axis(k.up, k.down);
     let mut yaw = axis(k.right, k.left);
     let roll = axis(k.c, k.z);
-    if k.right_mouse {
+    // Solo el modo de timoneo mueve la nave con el ratón; el botón derecho es mirada libre (cámara).
+    if k.mouse_steer && !k.right_mouse {
         pitch += -k.mouse_delta.1 / MOUSE_FULL_TURN_PX;
         yaw += k.mouse_delta.0 / MOUSE_FULL_TURN_PX;
     }
@@ -115,6 +125,8 @@ pub struct Platform {
     fb_w: usize,
     fb_h: usize,
     frame_time: f64,
+    /// Modo "ratón timonea" (alterna M / botón central); mientras está activo el cursor se captura.
+    mouse_steer: bool,
 }
 
 impl Platform {
@@ -129,7 +141,7 @@ impl Platform {
         rl.set_window_min_size(320, 180);
         let image = Image::gen_image_color(fb_width as i32, fb_height as i32, Color::BLACK);
         let texture = rl.load_texture_from_image(&thread, &image).expect("no se pudo crear la textura");
-        Self { rl, thread, texture, fb_w: fb_width, fb_h: fb_height, frame_time: 1.0 / 60.0 }
+        Self { rl, thread, texture, fb_w: fb_width, fb_h: fb_height, frame_time: 1.0 / 60.0, mouse_steer: false }
     }
 
     pub fn should_close(&self) -> bool {
@@ -144,7 +156,17 @@ impl Platform {
     pub fn poll(&mut self) -> UiInput {
         use KeyboardKey::*;
         self.frame_time = self.rl.get_frame_time() as f64;
+        if self.rl.is_key_pressed(KEY_M) || self.rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_MIDDLE) {
+            self.mouse_steer = !self.mouse_steer;
+            // captura el cursor para que el delta no se agote en el borde de la ventana
+            if self.mouse_steer {
+                self.rl.disable_cursor();
+            } else {
+                self.rl.enable_cursor();
+            }
+        }
         let rl = &self.rl;
+        let mouse_steer = self.mouse_steer;
         let right_mouse = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT);
         let md = rl.get_mouse_delta();
         let keys = KeyState {
@@ -163,6 +185,7 @@ impl Platform {
             shift: rl.is_key_down(KEY_LEFT_SHIFT) || rl.is_key_down(KEY_RIGHT_SHIFT),
             ctrl: rl.is_key_down(KEY_LEFT_CONTROL) || rl.is_key_down(KEY_RIGHT_CONTROL),
             right_mouse,
+            mouse_steer,
             mouse_delta: (md.x, md.y),
         };
         let mp = rl.get_mouse_position();
@@ -184,6 +207,8 @@ impl Platform {
             land_auto: rl.is_key_pressed(KEY_L),
             select_body: digits.iter().position(|&k| rl.is_key_pressed(k)),
             mouse_look: if right_mouse { (md.x, md.y) } else { (0.0, 0.0) },
+            free_look: right_mouse,
+            mouse_steer,
             scroll: rl.get_mouse_wheel_move(),
         }
     }
@@ -242,19 +267,33 @@ mod tests {
         assert_eq!((r.x, r.y, r.z), (1.0, 1.0, 1.0));
         let l = map_keys(&KeyState { left: true, z: true, down: true, ..Default::default() }).rotate;
         assert_eq!((l.x, l.y, l.z), (-1.0, -1.0, -1.0));
-        let m = map_keys(&KeyState { right_mouse: true, mouse_delta: (6.0, 0.0), ..Default::default() }).rotate;
-        assert!(m.y > 0.0, "arrastrar a la derecha gira a la derecha");
+        let m = map_keys(&KeyState { mouse_steer: true, mouse_delta: (6.0, 0.0), ..Default::default() }).rotate;
+        assert!(m.y > 0.0, "con el ratón timoneando, a la derecha gira a la derecha");
+        let m = map_keys(&KeyState { mouse_steer: true, mouse_delta: (0.0, -6.0), ..Default::default() }).rotate;
+        assert!(m.x > 0.0, "ratón arriba = morro arriba");
     }
 
     #[test]
-    fn mouse_only_with_right_button_and_clamped() {
+    fn right_button_is_free_look_and_never_steers() {
+        let r = map_keys(&KeyState { right_mouse: true, mouse_delta: (40.0, -40.0), ..Default::default() }).rotate;
+        assert_eq!((r.x, r.y, r.z), (0.0, 0.0, 0.0));
+        // aunque el timoneo esté activo, con el botón derecho (mirada libre) la nave no gira
+        let r = map_keys(&KeyState { right_mouse: true, mouse_steer: true, mouse_delta: (40.0, 40.0), ..Default::default() }).rotate;
+        assert_eq!((r.x, r.y, r.z), (0.0, 0.0, 0.0));
+        // las flechas siguen girando mientras se mira libremente
+        let r = map_keys(&KeyState { right_mouse: true, right: true, ..Default::default() }).rotate;
+        assert_eq!(r.y, 1.0);
+    }
+
+    #[test]
+    fn mouse_only_when_steering_and_clamped() {
         let none = map_keys(&KeyState { mouse_delta: (50.0, 50.0), ..Default::default() });
         assert_eq!((none.rotate.x, none.rotate.y), (0.0, 0.0));
-        let big = map_keys(&KeyState { right_mouse: true, mouse_delta: (1e6, -1e6), up: true, left: true, ..Default::default() });
+        let big = map_keys(&KeyState { mouse_steer: true, mouse_delta: (1e6, -1e6), up: true, left: true, ..Default::default() });
         for v in [big.rotate.x, big.rotate.y, big.rotate.z] {
             assert!((-1.0..=1.0).contains(&v));
         }
-        let nan = map_keys(&KeyState { right_mouse: true, mouse_delta: (f32::NAN, f32::INFINITY), ..Default::default() });
+        let nan = map_keys(&KeyState { mouse_steer: true, mouse_delta: (f32::NAN, f32::INFINITY), ..Default::default() });
         assert_eq!((nan.rotate.x, nan.rotate.y), (0.0, 0.0));
     }
 

@@ -4,6 +4,8 @@ use crate::world::Body;
 
 pub mod autopilot;
 pub mod camera;
+#[cfg(test)]
+mod feel;
 pub mod modes;
 pub mod physics;
 pub mod sim;
