@@ -35,20 +35,6 @@ Nota: el cuello de botella ahora es el sombreado de los planetas grandes (~6.5 m
 - Cuadros del Tour revisados a mano (`--record`): alineación, órbita, descenso y posada en Verdalia con el HUD correcto.
 - Ventana interactiva abre y corre sin errores (8 s con `--tour`). **Pendiente**: probar los controles manuales con teclado y ratón.
 
-## Pendiente para cubrir la rúbrica con margen
-
-1. Probar controles manuales y ajustar la sensación (sensibilidad, asistencia, frenado).
-2. Animar el tren de aterrizaje (la nave es una sola malla; hay que separar los grupos `gear_*` al cargar el OBJ).
-3. Usar la deformación por ruido en al menos un planeta (para que cuente como logro visible) y mostrar la comparación LOD.
-4. Selección de destino con teclas 1-6 (HUD ya las documenta; no está conectado).
-5. Efecto de cámara libre (mirada) separado del giro de la nave.
-6. README de entrega: controles, lista de características a evaluar y dónde verlas, uso de IA y recursos.
-7. Video del recorrido completo (`--record` + ffmpeg, o grabación de pantalla).
-
-## Siguiente fase (si el núcleo está estable, ~14/11)
-
-Terreno cube-sphere con LOD, objetos en superficie con distribución por semilla, mapa de normales, luego Mutante/Dunara/Nublar con vegetación propia (`03`, `07`).
-
 ## Actualización: segunda tanda integrada
 
 | Área | Estado |
