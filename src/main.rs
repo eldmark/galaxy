@@ -12,6 +12,7 @@ mod shading;
 mod ship;
 mod shipmodel;
 mod shot;
+mod terrain;
 mod world;
 
 use std::path::Path;
@@ -30,12 +31,19 @@ fn main() {
              galaxy --bench [--frames N]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
-             galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)"
+             galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
+             galaxy --terrain-shot out.png [--alt M] [--kind verdalia]   terreno con LOD (demo)"
         );
         return;
     }
     if let Some(out) = arg_value(&args, "--shot") {
         shot::system(Path::new(&out), time, has("--stats")).expect("no se pudo guardar el PNG");
+        return;
+    }
+    if let Some(out) = arg_value(&args, "--terrain-shot") {
+        let alt = arg_value(&args, "--alt").and_then(|a| a.parse().ok()).unwrap_or(300.0);
+        let kind = terrain::demo::kind_from_name(&arg_value(&args, "--kind").unwrap_or_default());
+        terrain::demo::shot(Path::new(&out), alt, kind).expect("no se pudo guardar el PNG");
         return;
     }
     if let Some(out) = arg_value(&args, "--shot-ship") {
