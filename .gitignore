@@ -3,3 +3,4 @@ target/
 !screenshots/*.png
 frames/
 perf.data*
+.claude/
