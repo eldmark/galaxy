@@ -32,15 +32,127 @@ pub struct Body {
     pub landable: bool,
 }
 
+pub const TAU: f64 = std::f64::consts::TAU;
+
+// ---- Utilidades vectoriales en f64 (math.rs no se toca) ----
+pub fn cross(a: DVec3, b: DVec3) -> DVec3 {
+    DVec3::new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+}
+/// Rota `v` alrededor de +Y el ángulo `a` (misma convención que `Mat4::rotation_y`).
+pub fn rot_y(v: DVec3, a: f64) -> DVec3 {
+    let (s, c) = a.sin_cos();
+    DVec3::new(c * v.x + s * v.z, v.y, -s * v.x + c * v.z)
+}
+pub fn smoothstep01(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 impl Body {
     /// Posición en el marco del sistema (sol en el origen) en el instante `t` (segundos de simulación).
-    pub fn position(&self, _t: f64) -> DVec3 {
-        todo!("nav")
+    /// Órbita circular inclinada: función analítica y periódica SOLO de `t` (no acumula estado).
+    pub fn position(&self, t: f64) -> DVec3 {
+        if self.orbit_radius <= 0.0 || self.orbit_period <= 0.0 {
+            return DVec3::ZERO;
+        }
+        let a = self.phase + TAU * (t / self.orbit_period).fract();
+        let (s, c) = a.sin_cos();
+        let (si, ci) = self.inclination.sin_cos();
+        DVec3::new(self.orbit_radius * c, self.orbit_radius * s * si, self.orbit_radius * s * ci)
     }
-    /// Ángulo de rotación propia (rad) en el instante `t`.
-    pub fn rotation_angle(&self, _t: f64) -> f64 {
-        todo!("nav")
+    /// Velocidad orbital (derivada analítica de `position`), m/s.
+    pub fn velocity(&self, t: f64) -> DVec3 {
+        if self.orbit_radius <= 0.0 || self.orbit_period <= 0.0 {
+            return DVec3::ZERO;
+        }
+        let w = TAU / self.orbit_period;
+        let a = self.phase + TAU * (t / self.orbit_period).fract();
+        let (s, c) = a.sin_cos();
+        let (si, ci) = self.inclination.sin_cos();
+        let r = self.orbit_radius * w;
+        DVec3::new(-r * s, r * c * si, r * c * ci)
     }
+    /// Ángulo de rotación propia (rad) en el instante `t`, alrededor de +Y.
+    pub fn rotation_angle(&self, t: f64) -> f64 {
+        if self.rotation_period <= 0.0 {
+            return 0.0;
+        }
+        TAU * (t / self.rotation_period).fract()
+    }
+    /// Velocidad angular de giro propio (rad/s).
+    pub fn spin_rate(&self) -> f64 {
+        if self.rotation_period <= 0.0 { 0.0 } else { TAU / self.rotation_period }
+    }
+    /// Esfera de influencia gravitatoria (m). Fuera de ella no atrae.
+    pub fn influence_radius(&self) -> f64 {
+        8.0 * self.radius
+    }
+    /// Suavizado ε de la gravedad (m): a = GM / (r² + ε²).
+    pub fn gravity_epsilon(&self) -> f64 {
+        0.05 * self.radius
+    }
+    /// Aceleración gravitatoria (vector) que este cuerpo ejerce en `pos` cuando su centro está en `center`.
+    /// Cae suavemente a 0 en el último 25 % de la esfera de influencia (sin saltos).
+    pub fn gravity_at(&self, center: DVec3, pos: DVec3) -> DVec3 {
+        if self.gm <= 0.0 {
+            return DVec3::ZERO;
+        }
+        let d = center - pos;
+        let r = d.length();
+        let infl = self.influence_radius();
+        if r >= infl || r < 1e-9 {
+            return DVec3::ZERO;
+        }
+        let eps = self.gravity_epsilon();
+        let fade = 1.0 - smoothstep01((r / infl - 0.75) / 0.25);
+        d * (self.gm / (r * r + eps * eps) * fade / r)
+    }
+    /// Vector del marco del mundo a partir de coordenadas fijas al cuerpo (gira con él).
+    pub fn fixed_to_world(&self, t: f64, v: DVec3) -> DVec3 {
+        rot_y(v, self.rotation_angle(t))
+    }
+    pub fn world_to_fixed(&self, t: f64, v: DVec3) -> DVec3 {
+        rot_y(v, -self.rotation_angle(t))
+    }
+    /// Velocidad del suelo en el punto relativo `rel` (respecto del centro) por la rotación propia.
+    pub fn spin_velocity(&self, rel: DVec3) -> DVec3 {
+        cross(DVec3::new(0.0, self.spin_rate(), 0.0), rel)
+    }
+}
+
+/// Altura de la superficie (m desde el centro) en la dirección `dir` (unitaria, marco del mundo).
+/// Por ahora una esfera lisa; el terreno la reemplazará (la colisión y el aterrizaje la usan).
+pub fn surface_height(body: &Body, _dir: DVec3) -> f64 {
+    body.radius
+}
+
+/// Altitud de `ship_pos` sobre la esfera (radio) de un cuerpo en `body_pos`.
+pub fn altitude(body_pos: DVec3, radius: f64, ship_pos: DVec3) -> f64 {
+    (ship_pos - body_pos).length() - radius
+}
+
+/// Índice del cuerpo con menor altitud (distancia a la superficie) en el instante `t`.
+pub fn nearest_body(bodies: &[Body], pos: DVec3, t: f64) -> usize {
+    let mut best = 0;
+    let mut best_alt = f64::MAX;
+    for (i, b) in bodies.iter().enumerate() {
+        let a = altitude(b.position(t), b.radius, pos);
+        if a < best_alt {
+            best_alt = a;
+            best = i;
+        }
+    }
+    best
+}
+
+/// Matriz de modelo (traslación relativa al ojo en f64 -> f32, rotación propia, escala de radio) para dibujar un cuerpo.
+/// `eye` es la posición del mundo del origen de la cámara (origen flotante).
+pub fn body_model_matrix(body: &Body, t: f64, eye: DVec3) -> crate::math::Mat4 {
+    use crate::math::{Mat4, Vec3};
+    let rel = (body.position(t) - eye).to_f32();
+    Mat4::translation(rel)
+        * Mat4::rotation_y(body.rotation_angle(t) as f32)
+        * Mat4::scale(Vec3::new(body.radius as f32, body.radius as f32, body.radius as f32))
 }
 
 /// Tabla de cuerpos: sol primero. Valores iniciales, se ajustan jugando.
@@ -49,12 +161,46 @@ pub fn solar_system() -> Vec<Body> {
     let b = |kind, name, radius, orbit_radius, orbit_period, rotation_period, inclination, phase, gm, landable| Body {
         kind, name, radius, orbit_radius, orbit_period, rotation_period, inclination, phase, gm, landable,
     };
+    // Jugabilidad: gravedad superficial ~30 m/s^2 (gm = 30 R^2); planetas se mueven ~280 m/s.
+    let g = |r: f64| 30.0 * r * r;
     vec![
         b(Sun, "Ignea", 8000.0, 0.0, 0.0, 240.0, 0.0, 0.0, 0.0, false),
-        b(Fornax, "Fornax", 3000.0, 22000.0, 150.0, 70.0, 0.05, 0.5, 4.0e9, true),
-        b(Verdalia, "Verdalia", 3500.0, 35000.0, 220.0, 90.0, 0.08, 2.0, 6.0e9, true),
-        b(Mutante, "Mutante", 2000.0, 55000.0, 300.0, 60.0, 0.10, 4.0, 2.0e9, true),
-        b(Siroco, "Siroco", 6000.0, 80000.0, 420.0, 45.0, 0.04, 1.0, 1.4e10, false),
-        b(Nix, "Nix", 2500.0, 105000.0, 540.0, 110.0, 0.12, 5.2, 3.0e9, true),
+        b(Fornax, "Fornax", 3000.0, 22000.0, 500.0, 70.0, 0.05, 0.5, g(3000.0), true),
+        b(Verdalia, "Verdalia", 3500.0, 35000.0, 800.0, 90.0, 0.08, 2.0, g(3500.0), true),
+        b(Mutante, "Mutante", 2000.0, 55000.0, 1200.0, 60.0, 0.10, 4.0, g(2000.0), true),
+        b(Siroco, "Siroco", 6000.0, 80000.0, 1800.0, 45.0, 0.04, 1.0, g(6000.0), false),
+        b(Nix, "Nix", 2500.0, 105000.0, 2400.0, 110.0, 0.12, 5.2, g(2500.0), true),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn orbit_is_periodic_and_stateless() {
+        for b in solar_system().iter().skip(1) {
+            let p0 = b.position(37.0);
+            let p1 = b.position(37.0 + b.orbit_period);
+            assert!((p0 - p1).length() < 1e-5, "{}", b.name);
+            assert!((b.position(37.0) - p0).length() == 0.0);
+            assert!((p0.length() - b.orbit_radius).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn velocity_matches_finite_difference() {
+        let sys = solar_system();
+        let b = &sys[2];
+        let h = 1e-3;
+        let fd = (b.position(100.0 + h) - b.position(100.0 - h)) * (1.0 / (2.0 * h));
+        assert!((fd - b.velocity(100.0)).length() < 1e-3);
+    }
+
+    #[test]
+    fn rot_y_matches_matrix() {
+        let v = rot_y(DVec3::new(1.0, 2.0, 3.0), 0.7);
+        let m = crate::math::Mat4::rotation_y(0.7).transform_dir(crate::math::Vec3::new(1.0, 2.0, 3.0));
+        assert!((v.to_f32() - m).length() < 1e-5);
+    }
 }
