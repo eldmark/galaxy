@@ -46,12 +46,20 @@ pub const RATE_ROLL: f64 = 1.6;
 /// Velocidad máxima de crucero y con boost (m/s).
 pub const CRUISE_SPEED: f64 = 1000.0;
 pub const BOOST_SPEED: f64 = 2000.0;
+/// Desaceleración máxima (m/s²) con que se recorta el exceso sobre el tope de velocidad. Debe ser mayor que la
+/// aceleración máxima (ACCEL_FWD·BOOST_ACCEL = 600) para que el tope realmente se sostenga.
+/// Cambio (nav2): antes el recorte era exponencial con τ = 1.5 s, que en equilibrio dejaba la nave 600 m/s POR ENCIMA
+/// del tope (medido: 1593 m/s en crucero y 2884 m/s con boost). Con un recorte acotado en aceleración (solo en CRUCERO; Orbit/Descent conservan el tope suave) el tope es
+/// firme y al soltar el boost la velocidad baja linealmente (sin tirones).
+pub const CAP_DECEL: f64 = 800.0;
 /// v_max = k·altitud en ORBITA y DESCENSO (1/s), con suelo mínimo.
 pub const ORBIT_SPEED_K: f64 = 1.0;
 pub const DESCENT_SPEED_K: f64 = 0.5;
 pub const MIN_SPEED_NEAR_GROUND: f64 = 3.0;
 /// Amortiguamiento de la asistencia de vuelo y del freno (1/s).
-pub const ASSIST_RATE: f64 = 0.7;
+/// Cambio (nav2): 0.7 -> 1.0. Con 0.7 la nave tardaba 3.5 s en bajar al 10 % de la velocidad al soltar el
+/// empuje (se sentía "flotante" a ~1 km/s); con 1.0 baja en ~2.5 s y sigue siendo exponencial, sin oscilar.
+pub const ASSIST_RATE: f64 = 1.0;
 pub const BRAKE_RATE: f64 = 2.0;
 /// Coeficientes de aterrizaje suave.
 pub const LAND_MAX_VSPEED: f64 = 6.0;

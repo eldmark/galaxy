@@ -63,6 +63,11 @@ impl Sim {
             self.start_tour();
         }
     }
+    /// Viaje automático al cuerpo `idx` (teclas 1..6 -> 0..=5; 0 = sol). Termina en una vuelta de órbita y
+    /// devuelve el control. Devuelve false si el índice no existe.
+    pub fn go_to(&mut self, idx: usize) -> bool {
+        self.autopilot.go_to(idx, &self.ship, &self.bodies, self.t)
+    }
     /// Aterrizaje automático en el planeta actual. Devuelve false si no hay un cuerpo aterrizable cerca.
     pub fn land_here(&mut self) -> bool {
         self.autopilot.start_landing_here(&self.ship, &self.bodies, self.t)

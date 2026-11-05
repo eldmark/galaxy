@@ -45,6 +45,10 @@ const A_DEC: f64 = 250.0; // deceleración de diseño del perfil (m/s²) < acele
 const A_LIM: f64 = 500.0; // tope de aceleración pedida
 const APPROACH_R: f64 = 3.5; // radios (centro) del punto de espera
 const ORBIT_R: f64 = 1.7; // radio de la órbita (altitud 1R)
+/// Cuerpos sin gravedad (el sol): el viaje orbita a este radio mínimo seguro (centro, en radios). Queda dentro de la
+/// órbita de Fornax (22 km desde el sol, borde interior a 19 km) para no cruzarse con él.
+const SUN_ORBIT_R: f64 = 2.0;
+const SUN_APPROACH_R: f64 = 2.3;
 const A_PROF: f64 = 220.0; // aceleración de diseño de los perfiles suaves (Approach)
 const ORBIT_SPEED: f64 = 1200.0;
 const ORBIT_RAMP: f64 = 4.0;
@@ -52,6 +56,14 @@ const FLARE_ALT: f64 = 60.0; // últimos 60 m
 const WAIT_T: f64 = 5.0;
 const KP: f64 = 0.64;
 const KD: f64 = 1.6;
+
+/// Radio (desde el centro) de la órbita de espera y de la órbita final del cuerpo, en radios.
+fn orbit_factor(b: &Body) -> f64 {
+    if b.gm <= 0.0 { SUN_ORBIT_R } else { ORBIT_R }
+}
+fn approach_factor(b: &Body) -> f64 {
+    if b.gm <= 0.0 { SUN_APPROACH_R } else { APPROACH_R }
+}
 
 fn clamp_mag(v: DVec3, m: f64) -> DVec3 {
     let l = v.length();
@@ -155,8 +167,11 @@ fn accel_to_thrust(q: Quat, a: DVec3, boost: bool) -> Vec3 {
 #[derive(Clone, Debug)]
 pub struct Autopilot {
     pub active: bool,
-    /// true = Tour completo; false = solo descenso y posada del cuerpo actual.
+    /// true = Tour completo; false = solo descenso y posada del cuerpo actual (o viaje, ver `trip`).
     pub tour: bool,
+    /// true = viaje a un destino (`go_to`): ALINEAR -> TRANSITO -> APROXIMAR -> ORBITAR 1 vuelta y se detiene.
+    /// En ese caso `tour` es false; para el HUD el botón de aterrizaje solo debe marcarse con `is_landing()`.
+    pub trip: bool,
     pub phase: Phase,
     /// Índice del cuerpo destino.
     pub target: usize,
@@ -200,6 +215,7 @@ impl Autopilot {
         Self {
             active: false,
             tour: true,
+            trip: false,
             phase: Phase::Idle,
             target: 0,
             gear: 0.0,
@@ -237,6 +253,14 @@ impl Autopilot {
     pub fn eta(&self) -> f64 {
         self.eta.max(0.0)
     }
+    /// ¿Hay un viaje a destino (teclas 1..6) en curso?
+    pub fn is_trip(&self) -> bool {
+        self.active && self.trip
+    }
+    /// ¿Hay un aterrizaje automático (botón ATERRIZAR AUTO) en curso?
+    pub fn is_landing(&self) -> bool {
+        self.active && !self.tour && !self.trip
+    }
     pub fn target_name<'a>(&self, bodies: &'a [Body]) -> &'a str {
         bodies.get(self.target).map(|b| b.name).unwrap_or("-")
     }
@@ -245,6 +269,7 @@ impl Autopilot {
     pub fn start(&mut self, ship: &Ship, bodies: &[Body], t: f64) {
         self.active = true;
         self.tour = true;
+        self.trip = false;
         let exclude = if ship.mode == NavMode::Landed { ship.frame } else { None };
         self.target = self.pick_next(ship.position, bodies, t, exclude);
         if ship.mode == NavMode::Landed {
@@ -254,6 +279,27 @@ impl Autopilot {
         } else {
             self.set_phase(Phase::Align, t, ship, bodies);
         }
+    }
+
+    /// Viaje automático al cuerpo `idx` (índice en `bodies`; 0 = sol): ALINEAR -> TRANSITO (intercepción) ->
+    /// APROXIMAR -> ORBITAR una vuelta y entonces se detiene (el control vuelve al jugador). No aterriza.
+    /// El sol se orbita a un radio mínimo seguro. Devuelve false si `idx` no existe.
+    pub fn go_to(&mut self, idx: usize, ship: &Ship, bodies: &[Body], t: f64) -> bool {
+        if idx >= bodies.len() {
+            return false;
+        }
+        self.active = true;
+        self.tour = false;
+        self.trip = true;
+        self.target = idx;
+        if ship.mode == NavMode::Landed {
+            self.set_phase(Phase::Takeoff, t, ship, bodies);
+        } else if ship.mode != NavMode::Cruise && ship.frame == Some(idx) {
+            self.set_phase(Phase::Approach, t, ship, bodies);
+        } else {
+            self.set_phase(Phase::Align, t, ship, bodies);
+        }
+        true
     }
 
     /// Detiene el autopiloto; la nave conserva su estado (sin saltos).
@@ -280,6 +326,7 @@ impl Autopilot {
         let Some((i, _)) = best else { return false };
         self.active = true;
         self.tour = false;
+        self.trip = false;
         self.target = i;
         self.set_phase(Phase::Descend, t, ship, bodies);
         true
@@ -336,7 +383,7 @@ impl Autopilot {
             Phase::Approach => {
                 self.e1 = rel.normalized();
                 self.r0 = rel.length();
-                let delta = (self.r0 - b.radius * ORBIT_R).abs();
+                let delta = (self.r0 - b.radius * orbit_factor(b)).abs();
                 self.app_total = (6.0 * delta / A_PROF).sqrt().max(5.0);
             }
             Phase::Orbit => {
@@ -371,7 +418,7 @@ impl Autopilot {
     /// Itera 4 veces (la órbita es analítica, es barato y estable).
     fn intercept(&self, p: DVec3, t: f64, bodies: &[Body]) -> (DVec3, f64) {
         let b = &bodies[self.target];
-        let off = self.off_dir * (b.radius * APPROACH_R);
+        let off = self.off_dir * (b.radius * approach_factor(b));
         let mut eta = 0.0;
         let mut tp = b.position(t) + off;
         for _ in 0..4 {
@@ -469,7 +516,7 @@ impl Autopilot {
             }
             Phase::Approach => {
                 let (e1, r0) = (self.e1, self.r0);
-                let r1 = b.radius * ORBIT_R;
+                let r1 = b.radius * orbit_factor(b);
                 let t0 = self.t0;
                 let tot = self.app_total;
                 self.eta = tot - self.phase_t;
@@ -511,6 +558,11 @@ impl Autopilot {
                 let outward = e1 * f.cos() + e2 * f.sin();
                 let rot = orient_input(ship.orientation, tangent, outward);
                 if self.phase_t >= total + 0.5 {
+                    if self.trip {
+                        // fin del viaje: el control vuelve al jugador con la nave en órbita
+                        self.stop();
+                        return Input::default();
+                    }
                     self.set_phase(Phase::Descend, t, ship, bodies);
                 }
                 self.input_from(ship, a, rot, true)
@@ -598,6 +650,10 @@ impl Autopilot {
                 if ship.mode != NavMode::Landed && alt > 0.6 * fb.radius {
                     self.takeoffs += 1;
                     // siguiente destino de la ruta
+                    if self.trip {
+                        self.set_phase(Phase::Align, t, ship, bodies);
+                        return self.input_from(ship, a, rot, false);
+                    }
                     if !self.tour {
                         self.stop();
                         return Input::default();
@@ -730,6 +786,101 @@ mod tests {
             }
         }
         assert_eq!(sim.ship.mode, NavMode::Landed);
+        assert!(!sim.autopilot.active);
+    }
+
+    /// Viaje a cada cuerpo desde la posición inicial de `app::new_sim()`.
+    fn trip_to(idx: usize, t_start: f64) -> (f64, f64, f64) {
+        let mut sim = crate::app::new_sim();
+        if t_start > 0.0 {
+            // reubica la nave frente a Verdalia en el instante t_start
+            sim.t = t_start;
+            let v = &sim.bodies[2];
+            sim.ship.position = v.position(t_start) + DVec3::new(0.0, 0.0, v.radius * 4.5);
+            sim.ship.velocity = v.velocity(t_start);
+        }
+        assert!(sim.go_to(idx));
+        assert!(sim.autopilot.is_trip() && !sim.autopilot.is_landing());
+        assert_eq!(sim.autopilot.target_name(&sim.bodies), sim.bodies[idx].name);
+        let t0 = sim.t;
+        let (mut min_clear, mut saw_orbit, mut max_eta) = (f64::MAX, false, 0.0f64);
+        while sim.autopilot.active && sim.t - t0 < 600.0 {
+            sim.frame(1.0 / 60.0, &Input::default());
+            assert!(sim.ship.contact.is_none(), "contacto con {:?} en fase {:?} t={:.1}", sim.ship.contact, sim.autopilot.phase, sim.t);
+            if sim.autopilot.phase == Phase::Orbit {
+                saw_orbit = true;
+            }
+            max_eta = max_eta.max(sim.autopilot.eta());
+            for b in &sim.bodies {
+                let clear = (sim.ship.position - b.position(sim.t)).length() - b.radius;
+                min_clear = min_clear.min(clear);
+            }
+        }
+        assert!(!sim.autopilot.active, "el viaje a {} no terminó (fase {:?})", sim.bodies[idx].name, sim.autopilot.phase);
+        assert!(saw_orbit, "debe pasar por la fase de órbita");
+        assert!(min_clear > 100.0, "pasó a {min_clear} m de un cuerpo");
+        // al terminar queda cerca del destino, en órbita, y el control es del jugador
+        let b = &sim.bodies[idx];
+        let alt_r = ((sim.ship.position - b.position(sim.t)).length() - b.radius) / b.radius;
+        assert!(alt_r > 0.5 && alt_r < 2.0, "altitud final {alt_r} R de {}", b.name);
+        assert!(!sim.ship.raw_controls);
+        if b.gm > 0.0 {
+            assert_eq!(sim.ship.mode, NavMode::Orbit);
+        }
+        assert!(max_eta > 0.0);
+        (sim.t - t0, min_clear, alt_r)
+    }
+
+    #[test]
+    fn go_to_every_body_ends_in_orbit() {
+        for idx in 0..6 {
+            let (dt, clear, alt) = trip_to(idx, 0.0);
+            println!("viaje a {idx}: {dt:.1} s, holgura min {clear:.0} m, altitud final {alt:.2} R");
+            assert!(dt < 420.0, "viaje {idx} demasiado largo: {dt}");
+        }
+    }
+
+    #[test]
+    fn go_to_works_from_other_start_times() {
+        for t0 in [217.0, 640.0, 1500.0] {
+            for idx in [0usize, 1, 3, 4, 5] {
+                trip_to(idx, t0);
+            }
+        }
+    }
+
+    #[test]
+    fn go_to_from_landed_takes_off_then_travels() {
+        let bodies = solar_system();
+        let b = &bodies[1];
+        let p = b.position(0.0) + DVec3::new(0.0, b.radius + SHIP_RADIUS, 0.0);
+        let mut sim = Sim::new(bodies, p);
+        sim.ship.velocity = sim.bodies[1].velocity(0.0);
+        sim.ship.mode = NavMode::Landed;
+        sim.ship.frame = Some(1);
+        sim.ship.landed_local = sim.bodies[1].world_to_fixed(0.0, p - sim.bodies[1].position(0.0));
+        assert!(sim.go_to(3));
+        assert_eq!(sim.autopilot.phase, Phase::Takeoff);
+        for _ in 0..(60 * 400) {
+            sim.frame(1.0 / 60.0, &Input::default());
+            if !sim.autopilot.active {
+                break;
+            }
+        }
+        assert!(!sim.autopilot.active);
+        assert_eq!(sim.ship.frame, Some(3));
+    }
+
+    #[test]
+    fn go_to_rejects_bad_index_and_player_interrupts() {
+        let mut sim = crate::app::new_sim();
+        assert!(!sim.go_to(99));
+        assert!(!sim.autopilot.active);
+        assert!(sim.go_to(4));
+        for _ in 0..120 {
+            sim.frame(1.0 / 60.0, &Input::default());
+        }
+        sim.frame(1.0 / 60.0, &Input { brake: true, ..Default::default() });
         assert!(!sim.autopilot.active);
     }
 }

@@ -131,13 +131,15 @@ El enunciado exige poder orientar la nave y ver el entorno durante el acercamien
 | Tecla | Acción |
 |---|---|
 | W/S, A/D, Q/E | Adelante/atrás, lateral, abajo/arriba |
-| Flechas o ratón (botón derecho) | Cabeceo y guiñada; `Z/C` alabeo |
+| Flechas | Cabeceo y guiñada; `Z/C` alabeo |
+| Botón derecho + arrastrar | Mirada libre de la cámara (no cambia el rumbo; vuelve al soltar) |
+| `M` o botón central | El ratón timonea la nave (alterna) |
 | Shift / Ctrl | Boost / freno |
 | `G` | Gravedad asistida sí/no |
 | `X` | Asistencia de vuelo sí/no |
 | `T` o clic en el botón | Iniciar/detener el Tour automático |
 | `L` o botón `ATERRIZAR AUTO` | Aterrizaje automático en el planeta actual |
 | `Espacio` | Despegar (si está posada) |
-| `1`-`6` | Fijar destino (HUD de navegación) |
+| `1`-`6` | Viaje automático al cuerpo (1 = sol): alinear, tránsito, aproximar y una vuelta de órbita |
 | `F1` ayuda, `F3` estadísticas, `F4` culling, `F5` LOD, `N` normal map |
 | `P` | Captura PNG |

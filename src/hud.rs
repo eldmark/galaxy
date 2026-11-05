@@ -360,6 +360,29 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
     HudLayout { tour, land }
 }
 
+/// Formatea un tiempo restante: "42 S", "1:05 MIN".
+pub fn format_eta(secs: f64) -> String {
+    if !secs.is_finite() || secs < 0.0 {
+        return "--".to_string();
+    }
+    let s = secs.round() as u64;
+    if s < 60 { format!("{s} S") } else { format!("{}:{:02} MIN", s / 60, s % 60) }
+}
+
+/// Panel de navegación (debajo de la telemetría): destino, fase y ETA del viaje o tour automático.
+/// Llamar después de `draw_hud_layout` solo si el autopiloto está activo:
+/// `draw_nav_panel(fb, ap.target_name(&bodies), ap.status(), ap.eta())`.
+pub fn draw_nav_panel(fb: &mut Framebuffer, dest: &str, phase: &str, eta_s: f64) {
+    let lines = [("DEST", dest.to_string(), COL_ACCENT), ("FASE", phase.to_string(), COL_TEXT), ("ETA", format_eta(eta_s), COL_GOOD)];
+    let r = Rect { x: 8, y: 8 + 10 + 4 * 18 + 6, w: 232, h: 10 + lines.len() as i32 * 18 };
+    panel(fb, r);
+    for (i, (k, v, c)) in lines.iter().enumerate() {
+        let y = r.y + 6 + i as i32 * 18;
+        draw_text_shadow(fb, 16, y, k, COL_DIM, 2);
+        draw_text_shadow(fb, 16 + 80, y, v, *c, 2);
+    }
+}
+
 fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
     let s = state.stats;
     let rows: Vec<(String, [u8; 3])> = vec![
@@ -389,20 +412,21 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 17] = [
+pub const HELP_ROWS: [(&str, &str); 18] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
     ("FLECHAS", "Cabeceo y guinada"),
     ("Z / C", "Alabeo"),
-    ("RATON DER.", "Arrastrar: mirar libremente"),
+    ("RATON DER.", "Arrastrar: mirar libre"),
+    ("M / BTN MED", "Raton timonea on/off"),
     ("SHIFT", "Boost"),
     ("CTRL", "Freno"),
     ("G", "Gravedad on/off"),
     ("X", "Asistencia de vuelo on/off"),
     ("T", "Tour automatico"),
     ("L", "Aterrizar automatico"),
-    ("1 - 6", "Elegir destino"),
+    ("1 - 6", "Viajar al cuerpo (1=sol)"),
     ("F1", "Esta ayuda"),
     ("F3 / F4 / F5", "Stats / culling / LOD"),
     ("P", "Captura de pantalla"),
@@ -461,6 +485,25 @@ mod tests {
             lod_on: false,
             land_active: false,
         }
+    }
+
+    #[test]
+    fn nav_panel_draws_and_eta_formats() {
+        assert_eq!(format_eta(42.2), "42 S");
+        assert_eq!(format_eta(65.0), "1:05 MIN");
+        assert_eq!(format_eta(f64::NAN), "--");
+        let mut fb = Framebuffer::new(960, 540);
+        draw_nav_panel(&mut fb, "VERDALIA", "TRANSITO", 61.0);
+        assert!(lit_bbox(&fb, 0).is_some());
+        let mut tiny = Framebuffer::new(10, 10);
+        draw_nav_panel(&mut tiny, "X", "Y", 1.0);
+    }
+
+    #[test]
+    fn help_rows_fit_and_document_new_controls() {
+        assert!(HELP_ROWS.iter().any(|(k, _)| k.contains("M /")));
+        assert!(HELP_ROWS.iter().all(|(k, d)| k.len() <= 13 && d.len() <= 28), "texto demasiado largo para el panel");
+        assert!(56 + HELP_ROWS.len() as i32 * 18 + 24 < 540);
     }
 
     #[test]
@@ -615,6 +658,7 @@ mod tests {
         st.tour_active = true;
         st.tour_status = "TRANSITO A SIROCO  ETA 0:42";
         draw_hud_layout(&mut fb, &st, (480.0, 515.0));
+        draw_nav_panel(&mut fb, "SIROCO", "TRANSITO", 42.0);
         write_png(&format!("{dir}/hud_main.png"), &fb);
         st.show_help = true;
         draw_hud_layout(&mut fb, &st, (0.0, 0.0));
