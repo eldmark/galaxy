@@ -1,4 +1,8 @@
 //! Pipeline de rasterizado por software. Dueño: agente `raster`.
+mod pipeline;
+#[cfg(test)]
+mod tests;
+
 use crate::geometry::Mesh;
 use crate::math::{Mat4, Vec3};
 
@@ -25,6 +29,10 @@ impl Framebuffer {
             px.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
         self.depth.fill(0.0);
+    }
+    /// Guarda el color actual como PNG.
+    pub fn save_png(&self, path: &std::path::Path) -> std::io::Result<()> {
+        crate::png::save(path, self.width, self.height, &self.color)
     }
 }
 
@@ -95,13 +103,15 @@ pub struct Stats {
 }
 
 /// Dibuja todas las llamadas con `view` y `proj`. No limpia el framebuffer.
+/// Los contadores de `stats` se ACUMULAN (el llamador pone `Stats::default()` al inicio del cuadro).
+/// Las mallas con `bounds_radius <= 0` no se someten a frustum culling.
 pub fn render_scene(
-    _fb: &mut Framebuffer,
-    _view: Mat4,
-    _proj: Mat4,
-    _calls: &[DrawCall],
-    _opts: &RenderOptions,
-    _stats: &mut Stats,
+    fb: &mut Framebuffer,
+    view: Mat4,
+    proj: Mat4,
+    calls: &[DrawCall],
+    opts: &RenderOptions,
+    stats: &mut Stats,
 ) {
-    todo!("raster")
+    pipeline::render(fb, view, proj, calls, opts, stats);
 }

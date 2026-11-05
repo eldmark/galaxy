@@ -4,6 +4,7 @@ mod geometry;
 mod hud;
 mod math;
 mod platform;
+mod png;
 mod raster;
 mod shading;
 mod ship;
