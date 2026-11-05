@@ -7,6 +7,7 @@ mod math;
 mod platform;
 mod png;
 mod raster;
+mod relief;
 mod shading;
 mod ship;
 mod shot;
