@@ -1,6 +1,7 @@
 //! Capturas sin ventana (`--shot`, `--shot-ship`): sirven para verificar el pipeline completo
 //! (OBJ, LOD de esfera, shaders reales, rasterizador) sin depender de la navegación.
-use crate::geometry::{SphereLods, load_obj};
+use crate::geometry::SphereLods;
+use crate::shipmodel::ShipModel;
 use crate::math::{Mat4, Vec3};
 use crate::raster::{DrawCall, Framebuffer, RenderOptions, Stats, Uniforms, render_scene};
 use crate::shading::{shader_for, shader_for_ring, ship_shader, sky_color};
@@ -90,10 +91,9 @@ pub fn system(out: &Path, time: f32, stats_out: bool) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Vista cercana de la nave real cargada desde `assets/models/ship.obj`.
-pub fn ship(out: &Path, time: f32) -> Result<(), Box<dyn std::error::Error>> {
-    let mut mesh = load_obj("assets/models/ship.obj")?;
-    mesh.update_bounds();
+/// Vista cercana de la nave real (`assets/models/ship.obj`) con el tren en `gear` (0 plegado, 1 desplegado).
+pub fn ship(out: &Path, time: f32, gear: f32) -> Result<(), Box<dyn std::error::Error>> {
+    let sm = ShipModel::load("assets/models/ship.obj")?;
     let shader = ship_shader();
     let eye = Vec3::new(14.0, 7.0, -20.0);
     let view = Mat4::look_at(eye, Vec3::ZERO, Vec3::Y);
@@ -102,14 +102,10 @@ pub fn ship(out: &Path, time: f32) -> Result<(), Box<dyn std::error::Error>> {
     paint_sky(&mut fb, view, time);
     let model = Mat4::rotation_y(time * 0.5);
     let light = Vec3::new(0.5, 0.8, -0.3).normalized();
-    let call = DrawCall {
-        mesh: &mesh,
-        model,
-        shader: shader.as_ref(),
-        uniforms: Uniforms { light_dir: light, time, detail: 1.0, model },
-    };
+    let uniforms = Uniforms { light_dir: light, time, detail: 1.0, model };
+    let calls = sm.draw_calls(model, gear, shader.as_ref(), uniforms);
     let mut stats = Stats::default();
-    render_scene(&mut fb, view, proj, &[call], &RenderOptions::default(), &mut stats);
+    render_scene(&mut fb, view, proj, &calls,&RenderOptions::default(), &mut stats);
     fb.save_png(out)?;
     Ok(())
 }

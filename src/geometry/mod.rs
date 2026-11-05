@@ -7,6 +7,7 @@
 //! - **Subdivisión**: [`icosphere`] genera geometría nueva (20 * 4^n triángulos) antes de rasterizar.
 //! - **Deformación**: [`displace`] / [`displaced_sphere`] mueven cada vértice según una función de ruido.
 //! - **LOD**: [`SphereLods`] elige el nivel de subdivisión según el tamaño en pantalla.
+pub mod groups;
 pub mod lod;
 mod normals;
 pub mod obj;
@@ -15,6 +16,7 @@ pub mod sphere;
 
 pub use lod::SphereLods;
 pub use normals::recompute_normals;
+pub use groups::{load_obj_groups, parse_obj_groups};
 pub use obj::{load_obj, parse_obj};
 pub use shapes::{cube_mesh, quad_mesh, ring_mesh};
 pub use sphere::{displace, displaced_sphere, icosphere};

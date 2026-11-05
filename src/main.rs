@@ -10,6 +10,7 @@ mod raster;
 mod relief;
 mod shading;
 mod ship;
+mod shipmodel;
 mod shot;
 mod world;
 
@@ -29,7 +30,7 @@ fn main() {
              galaxy --bench [--frames N]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
-             galaxy --shot-ship out.png      vista de la nave"
+             galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)"
         );
         return;
     }
@@ -38,7 +39,8 @@ fn main() {
         return;
     }
     if let Some(out) = arg_value(&args, "--shot-ship") {
-        shot::ship(Path::new(&out), time).expect("error al renderizar la nave");
+        let gear: f32 = arg_value(&args, "--gear").and_then(|g| g.parse().ok()).unwrap_or(1.0);
+        shot::ship(Path::new(&out), time, gear).expect("error al renderizar la nave");
         return;
     }
     if let Some(dir) = arg_value(&args, "--record") {
