@@ -1,6 +1,8 @@
 //! Bucle principal: une simulación, cámara, escena (LOD + culling), HUD y entrada.
 use crate::geometry::{Mesh, SphereLods, ring_mesh};
 use crate::shipmodel::ShipModel;
+use crate::terrain::{ChunkKey, Frustum, Terrain};
+use std::sync::Arc;
 use crate::hud::{HudLayout, HudState, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
@@ -18,6 +20,10 @@ pub const FOV_Y: f32 = 1.0;
 const NEAR: f32 = 1.0;
 const FAR: f32 = 600_000.0;
 const LOD_MARGIN: f32 = 0.25;
+/// Altitud (en radios) a la que se cambia de esfera a terreno con chunks, con histéresis.
+const TERRAIN_ON: f64 = 0.5;
+const TERRAIN_OFF: f64 = 0.7;
+const TERRAIN_MAX_LEVEL: u8 = 8;
 
 /// Cielo precalculado como cubemap: las estrellas no cambian, así que `sky_color` se evalúa una vez
 /// por texel al arrancar y cada cuadro solo muestrea (antes costaba ~27 ms por cuadro a 960x540).
@@ -120,6 +126,11 @@ pub struct Scene {
     ring_shader: Box<dyn FragmentShader>,
     ship: ShipModel,
     ship_shader: Box<dyn FragmentShader>,
+    /// Terreno con LOD continuo por cuerpo aterrizable (reemplaza a la esfera cerca del suelo).
+    terrains: Vec<Option<Terrain>>,
+    use_terrain: Vec<bool>,
+    /// Triángulos de terreno seleccionados en el último cuadro (para el HUD y las mediciones).
+    pub terrain_triangles: u32,
 }
 
 impl Scene {
@@ -135,6 +146,9 @@ impl Scene {
             ring_shader: shader_for_ring(),
             ship,
             ship_shader: ship_shader(),
+            terrains: bodies.iter().map(|b| b.landable.then(|| Terrain::new(b.kind, b.radius, TERRAIN_MAX_LEVEL))).collect(),
+            use_terrain: vec![false; bodies.len()],
+            terrain_triangles: 0,
         }
     }
 
@@ -163,6 +177,26 @@ impl Scene {
             };
         }
 
+        // Terreno: cerca del suelo se dibujan chunks (en el marco local del planeta) en vez de la esfera.
+        let q = cam.orientation();
+        let (fwd_w, up_w) = (q.rotate(Vec3::new(0.0, 0.0, -1.0)).to_f64(), q.rotate(Vec3::Y).to_f64());
+        let aspect = fb.width as f64 / fb.height as f64;
+        let mut chunk_sets: Vec<(usize, Vec<(ChunkKey, Arc<Mesh>)>)> = Vec::new();
+        self.terrain_triangles = 0;
+        for (i, b) in sim.bodies.iter().enumerate() {
+            let Some(terrain) = self.terrains[i].as_mut() else { continue };
+            let alt = dists[i] as f64 / b.radius - 1.0;
+            self.use_terrain[i] = if self.use_terrain[i] { alt < TERRAIN_OFF } else { alt < TERRAIN_ON };
+            if !self.use_terrain[i] {
+                continue;
+            }
+            let cam_local = b.world_to_fixed(sim.t, eye - b.position(sim.t));
+            let frustum = Frustum::from_camera(cam_local, b.world_to_fixed(sim.t, fwd_w), b.world_to_fixed(sim.t, up_w), FOV_Y as f64, aspect);
+            let chunks = terrain.frame(cam_local, FOV_Y as f64, fb.height as f64, Some(&frustum));
+            self.terrain_triangles += terrain.stats.triangles;
+            chunk_sets.push((i, chunks));
+        }
+
         let mut calls: Vec<DrawCall> = Vec::new();
         for (i, b) in sim.bodies.iter().enumerate() {
             let pos = b.position(sim.t);
@@ -170,12 +204,14 @@ impl Scene {
             let light = if i == 0 { Vec3::Y } else { (-pos).normalized().to_f32() };
             let coverage = b.radius as f32 / dists[i].max(1.0);
             let detail = if lod_on { (coverage * 8.0).clamp(0.15, 1.0) } else { 1.0 };
-            calls.push(DrawCall {
-                mesh: &self.lods[i].levels[self.levels[i]],
-                model,
-                shader: self.shaders[i].as_ref(),
-                uniforms: Uniforms { light_dir: light, time, detail, model },
-            });
+            if !self.use_terrain[i] {
+                calls.push(DrawCall {
+                    mesh: &self.lods[i].levels[self.levels[i]],
+                    model,
+                    shader: self.shaders[i].as_ref(),
+                    uniforms: Uniforms { light_dir: light, time, detail, model },
+                });
+            }
             if b.name == "Siroco" {
                 let rel = (pos - eye).to_f32();
                 let m = Mat4::translation(rel) * Mat4::rotation_z(0.35) * Mat4::uniform_scale(b.radius as f32);
@@ -184,6 +220,20 @@ impl Scene {
                     model: m,
                     shader: self.ring_shader.as_ref(),
                     uniforms: Uniforms { light_dir: light, time, detail, model: m },
+                });
+            }
+        }
+        // Chunks de terreno: mallas en metros locales, modelo = traslación relativa al ojo * rotación del planeta (sin escala).
+        for (i, chunks) in &chunk_sets {
+            let b = &sim.bodies[*i];
+            let model = Mat4::translation((b.position(sim.t) - eye).to_f32()) * Mat4::rotation_y(b.rotation_angle(sim.t) as f32);
+            let light = (-b.position(sim.t)).normalized().to_f32();
+            for (_, mesh) in chunks {
+                calls.push(DrawCall {
+                    mesh: mesh.as_ref(),
+                    model,
+                    shader: self.shaders[*i].as_ref(),
+                    uniforms: Uniforms { light_dir: light, time, detail: 1.0, model },
                 });
             }
         }

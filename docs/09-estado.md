@@ -1,6 +1,6 @@
 # 09. Estado del proyecto
 
-Última actualización: 2026-11-05. Entrega: 20/11/2026.
+Última actualización: 2026-11-05 (tras la segunda tanda de agentes). Entrega: 20/11/2026.
 
 ## Hecho (fase rúbrica-100, integrado en `main`)
 
@@ -48,3 +48,25 @@ Nota: el cuello de botella ahora es el sombreado de los planetas grandes (~6.5 m
 ## Siguiente fase (si el núcleo está estable, ~14/11)
 
 Terreno cube-sphere con LOD, objetos en superficie con distribución por semilla, mapa de normales, luego Mutante/Dunara/Nublar con vegetación propia (`03`, `07`).
+
+## Actualización: segunda tanda integrada
+
+| Área | Estado |
+|---|---|
+| Tren de aterrizaje animado (`src/shipmodel.rs`, grupos OBJ) | integrado |
+| Relieve por planeta (`src/relief.rs`), LOD deformado por cuerpo, colisión y aterrizaje contra el relieve | integrado |
+| Viaje a destino (teclas 1-6), mirada libre (botón derecho), timoneo con ratón (`M`) | integrado |
+| Terreno cube-sphere con LOD continuo (`src/terrain/`): se usa al bajar de 0.5 radios | integrado |
+| README, `scripts/video.sh`, `scripts/record-demo.sh`, `docs/10-guion-demo.md` | integrado |
+
+Tour completo con descenso y aterrizaje (`--bench --frames 6300`): 11.2 ms medio, 46 ms máximo (pico al generar los primeros chunks), 960x540.
+Pruebas: 121 pasan, 3 ignoradas.
+
+## Pendiente (orden sugerido)
+
+1. Probar a mano los controles (teclado y ratón) y la sensación de vuelo.
+2. Objetos en superficie con distribución por semilla (árbol, obsidiana, cristal): `src/scatter.rs`.
+3. Mapa de normales y atmósfera según altitud (cielo azul cerca del suelo, como en `terrain/demo.rs`).
+4. Reducir el pico de 46 ms (precalentar chunks bajo la nave durante el descenso).
+5. Mutante/Dunara/Nublar con vegetación propia; HUD con las estadísticas del terreno.
+6. Grabar el video y rellenar `[NOMBRE]`, capturas y enlace en el README.

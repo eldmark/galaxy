@@ -125,7 +125,7 @@ Los contadores de `F3` son: `DRAW CALLS (CULL n)`, `TRI ENTRADA`, `TRI BACKFACE`
 
 También funcionan, aunque no están en la lista de puntos: Tour automático y aterrizaje automático (`src/ship/autopilot.rs`), anillo de Siroco como malla propia (`geometry::ring_mesh`) y cielo con cubemap.
 
-En desarrollo y todavía no implementado: terreno con chunks y LOD continuo a nivel de suelo, objetos de superficie (los modelos `tree.obj`, `obsidian.obj` e `ice_crystal.obj` ya existen en `assets/models/` pero la escena no los carga), distribución con semilla, mapa de normales, luna de Verdalia, y los planetas Dunara, Nublar y Egrin de `docs/07-assets-y-temas.md`. El tren de aterrizaje ya se anima (`src/shipmodel.rs`). El plan está en `docs/`.
+El terreno con chunks y LOD continuo ya se usa al bajar de 0.5 radios de altitud (`src/terrain/`, integrado en `Scene::render` de `src/app.rs`). En desarrollo y todavía no implementado: objetos de superficie (los modelos `tree.obj`, `obsidian.obj` e `ice_crystal.obj` ya existen en `assets/models/` pero la escena no los carga), distribución con semilla, mapa de normales, luna de Verdalia, y los planetas Dunara, Nublar y Egrin de `docs/07-assets-y-temas.md`. El tren de aterrizaje ya se anima (`src/shipmodel.rs`). El plan está en `docs/`.
 
 ## Parámetros para cambiar en la demostración
 
