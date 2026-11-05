@@ -62,7 +62,7 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 
 Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos.
 
-En desarrollo (la ayuda los lista pero todavía no hacen nada, porque el bucle de `src/app.rs` no los usa): las teclas `1`-`6` para elegir destino, el arrastre con el botón derecho del ratón para mirar libremente y la rueda del ratón. La nave solo se orienta con las flechas y `Z`/`C`, y la cámara la sigue con retardo.
+Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 
 ## Arquitectura del pipeline
 
@@ -97,7 +97,7 @@ src/world        raster/pipeline.rs (todo el rasterizador)                      
 | Nave controlable | `src/ship/physics.rs` (`step`); probar con `W/A/S/D/Q/E`, flechas, `Shift` y `Ctrl` |
 | Planetas que orbitan y rotan según el tiempo transcurrido, no los cuadros | `Body::position(t)` y `Body::rotation_angle(t)` en `src/world/mod.rs` son funciones puras del tiempo; la prueba `orbit_is_periodic_and_stateless` lo verifica. El tiempo `sim.t` avanza en múltiplos exactos de 1/120 s (`src/ship/stepper.rs`); la prueba `fixed_step_is_frame_rate_independent` simula con distintos FPS y obtiene la misma posición |
 | Acercarse y alejarse sin pantalla de carga | Un solo mundo y un solo bucle (`app::run`); el LOD cambia de malla en caliente con histéresis. Se ve en el Tour o volando hacia Verdalia |
-| Poder orientar la nave y ver el entorno al acercarse | La nave se orienta con flechas y `Z`/`C`; la cámara la sigue (`src/ship/camera.rs`). La mirada libre con el ratón está en desarrollo |
+| Poder orientar la nave y ver el entorno al acercarse | La nave se orienta con flechas y `Z`/`C`; con el botón derecho del ratón se mira libremente sin cambiar el rumbo (`src/ship/camera.rs`, `CameraRig::update`) |
 | Matrices de modelo, vista y proyección y prueba de profundidad | `body_model_matrix` (modelo), `CameraRig::view_matrix` (vista), `Mat4::perspective` (proyección) y el z-buffer `1/w` de `raster/pipeline.rs`; pruebas en `src/raster/tests.rs` |
 | Al menos un shader de fragmentos propio | Seis shaders en `src/shading/` (sol, Verdalia, Siroco, Mutante, Nix, Fornax) más anillo, nave y cielo |
 | Entrega: código, recursos, instrucciones y video del recorrido | Este README, `assets/`, `scripts/record-demo.sh` y `scripts/video.sh`. `[VIDEO: enlace al mp4 final]` |
@@ -113,19 +113,19 @@ Los contadores de `F3` son: `DRAW CALLS (CULL n)`, `TRI ENTRADA`, `TRI BACKFACE`
 | Planetas (5) | Hecho | `world::solar_system` en `src/world/mod.rs`: Fornax, Verdalia, Mutante, Siroco y Nix, más el sol Ígnea | `--shot screenshots/sistema.png` los muestra en fila; en la ventana, volar hacia cada uno o dejar el Tour |
 | Shaders propios (4 distintos) | Hecho | `src/shading/`: `rocky.rs` (Verdalia), `giant.rs` (Siroco), `ice.rs` (Nix), `volcanic.rs` (Fornax), más `sun.rs`, `pixel.rs`, `props.rs` y `sky.rs`. `shader_for` en `src/shading/mod.rs` | Acercarse a cada planeta y comparar su aspecto |
 | Shader animado | Hecho | Lava de Fornax y nubes de Verdalia (usan `Uniforms::time`), tormenta de Siroco, granulación del sol, vaca a cerdo de Mutante (24 s de ciclo, `pixel.rs`) | Mirar Siroco o el sol unos segundos: las bandas y la granulación cambian solas |
-| Deformación por ruido | En desarrollo | La función existe (`geometry::displace` y `displaced_sphere` en `src/geometry/sphere.rs`, con prueba), pero `Scene::new` la llama con altura cero (`SphereLods::new(5, &|_| 0.0)`), así que los planetas aún no se ven deformados | Aún no demostrable en pantalla |
+| Deformación por ruido | Hecho | `relief::height` (`src/relief.rs`) desplaza cada planeta (Verdalia ±3 %, Fornax ±3.5 %, Nix ±2 %, Mutante ±2.5 % en 16 escalones) mediante `geometry::displace`; `relief::displaced_lods` genera la malla de cada nivel de LOD | Mirar la silueta de Verdalia o Fornax de cerca: ya no es una esfera lisa |
 | Subdivisión procedural de geometría | Hecho | `icosphere(n)` en `src/geometry/sphere.rs` genera 20·4ⁿ triángulos; `SphereLods` crea los niveles 0 a 5 al arrancar | Con `F5` apagado todos los planetas usan el nivel 5; con `F5` encendido se ve `TRI ENTRADA` bajar |
 | Descarte fuera de vista (culling) | Hecho | Frustum culling por esfera y descarte de caras traseras en `raster/pipeline.rs`; contadores en `Stats` (`src/raster/mod.rs`) | `F3`; mirar a otro lado y ver subir `CULL` en `DRAW CALLS`; `F4` apaga el frustum culling y `TRI ENTRADA` sube |
 | Niveles de detalle (LOD) | Hecho | LOD de geometría por error de silueta en píxeles: `SphereLods::select_with_hysteresis` en `src/geometry/lod.rs`. LOD del shader: el uniforme `detail` y `octaves` en `src/shading/noise.rs`, calculado en `Scene::render` (`src/app.rs`) | `F3` y alejarse o acercarse a un planeta viendo `TRI ENTRADA`; `F5` apaga todo el LOD |
 | Aceleración progresiva con paso fijo | Hecho | `src/ship/stepper.rs` (`FixedStepper`, 1/120 s con acumulador) y `src/ship/physics.rs`: la entrada fija una aceleración objetivo que la nave alcanza con constante de tiempo `TAU_ACCEL` (`src/ship/modes.rs`) | Mantener `W` y ver el `VEL` del HUD subir gradualmente; soltar y ver que se frena con suavidad. La prueba `fixed_step_is_frame_rate_independent` lo asegura |
 | Gravedad | Hecho | `Body::gravity_at` en `src/world/mod.rs` y `effective_gravity` en `src/ship/physics.rs` | Apagar la asistencia con `X`, acercarse a un planeta con `G` activo y soltar los motores: la trayectoria se curva. Con `G` apagada sigue recta |
-| Colisión | Hecho (contra esfera lisa) | `collide` en `src/ship/physics.rs`: nave como esfera de 6 m contra `surface_height`, que por ahora devuelve el radio del planeta | Dirigirse al suelo sin frenar: rebota; a baja velocidad se posa (modo POSADA) |
+| Colisión | Hecho (contra el relieve) | `collide` en `src/ship/physics.rs`: nave como esfera de 6 m contra `surface_height_at` (radio * (1 + `relief::height`)) | Dirigirse al suelo sin frenar: rebota; a baja velocidad se posa (modo POSADA) |
 | Control local alrededor de un planeta | Hecho | Modos ORBITA y DESCENSO en `update_mode` (`src/ship/physics.rs`) y constantes en `src/ship/modes.rs`; la nave hereda el movimiento del planeta | El HUD (`MODO`) cambia a ORBITA al bajar de 3 radios; el planeta deja de "escaparse" y se puede rodear a baja velocidad |
 | Presentación | Hecho | HUD con modo, planeta cercano, altitud y velocidad, botones del Tour, ayuda (`F1`) y estadísticas (`F3`) en `src/hud.rs` | `F1` y `F3` |
 
 También funcionan, aunque no están en la lista de puntos: Tour automático y aterrizaje automático (`src/ship/autopilot.rs`), anillo de Siroco como malla propia (`geometry::ring_mesh`) y cielo con cubemap.
 
-En desarrollo y todavía no implementado: terreno con relieve y LOD de chunks, objetos de superficie (los modelos `tree.obj`, `obsidian.obj` e `ice_crystal.obj` ya existen en `assets/models/` pero la escena no los carga), distribución con semilla, mapa de normales, luna de Verdalia, el tren de aterrizaje animado, y los planetas Dunara, Nublar y Egrin de `docs/07-assets-y-temas.md`. El plan está en `docs/`.
+En desarrollo y todavía no implementado: terreno con chunks y LOD continuo a nivel de suelo, objetos de superficie (los modelos `tree.obj`, `obsidian.obj` e `ice_crystal.obj` ya existen en `assets/models/` pero la escena no los carga), distribución con semilla, mapa de normales, luna de Verdalia, y los planetas Dunara, Nublar y Egrin de `docs/07-assets-y-temas.md`. El tren de aterrizaje ya se anima (`src/shipmodel.rs`). El plan está en `docs/`.
 
 ## Parámetros para cambiar en la demostración
 
