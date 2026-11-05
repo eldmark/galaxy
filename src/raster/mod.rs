@@ -100,6 +100,8 @@ pub struct Stats {
     pub ms_vertex: f32,
     pub ms_raster: f32,
     pub ms_shade: f32,
+    /// Fondo estelar (lo mide el coordinador, no el rasterizador).
+    pub ms_sky: f32,
 }
 
 /// Dibuja todas las llamadas con `view` y `proj`. No limpia el framebuffer.

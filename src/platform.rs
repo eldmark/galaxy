@@ -69,16 +69,16 @@ pub const MOUSE_FULL_TURN_PX: f32 = 12.0;
 
 /// Mapea teclas a `ship::Input`. Opuestos se cancelan; todos los valores quedan en [-1, 1].
 /// Convención: thrust.z +1 = adelante (W), thrust.x +1 = derecha (D), thrust.y +1 = arriba (E).
-/// rotate.x +1 = morro arriba (flecha arriba / ratón arriba), rotate.y +1 = guiñada a la izquierda
-/// (flecha izquierda / ratón izquierda), rotate.z +1 = alabeo antihorario visto desde la nave (Z).
+/// Convención de `ship::Input` (la que usa la física): rotate.x +1 = morro arriba (flecha arriba / ratón arriba),
+/// rotate.y +1 = guiñada a la DERECHA (flecha derecha / ratón a la derecha), rotate.z +1 = alabeo a la DERECHA (C).
 pub fn map_keys(k: &KeyState) -> Input {
     let thrust = Vec3::new(axis(k.d, k.a), axis(k.e, k.q), axis(k.w, k.s));
     let mut pitch = axis(k.up, k.down);
-    let mut yaw = axis(k.left, k.right);
-    let roll = axis(k.z, k.c);
+    let mut yaw = axis(k.right, k.left);
+    let roll = axis(k.c, k.z);
     if k.right_mouse {
         pitch += -k.mouse_delta.1 / MOUSE_FULL_TURN_PX;
-        yaw += -k.mouse_delta.0 / MOUSE_FULL_TURN_PX;
+        yaw += k.mouse_delta.0 / MOUSE_FULL_TURN_PX;
     }
     let cl = |v: f32| if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
     Input { thrust, rotate: Vec3::new(cl(pitch), cl(yaw), cl(roll)), boost: k.shift, brake: k.ctrl }
@@ -234,6 +234,16 @@ mod tests {
         let i = map_keys(&KeyState { s: true, a: true, q: true, ..Default::default() });
         assert_eq!((i.thrust.x, i.thrust.y, i.thrust.z), (-1.0, -1.0, -1.0));
         assert!(!i.boost && !i.brake);
+    }
+
+    #[test]
+    fn rotation_follows_ship_input_convention() {
+        let r = map_keys(&KeyState { right: true, c: true, up: true, ..Default::default() }).rotate;
+        assert_eq!((r.x, r.y, r.z), (1.0, 1.0, 1.0));
+        let l = map_keys(&KeyState { left: true, z: true, down: true, ..Default::default() }).rotate;
+        assert_eq!((l.x, l.y, l.z), (-1.0, -1.0, -1.0));
+        let m = map_keys(&KeyState { right_mouse: true, mouse_delta: (6.0, 0.0), ..Default::default() }).rotate;
+        assert!(m.y > 0.0, "arrastrar a la derecha gira a la derecha");
     }
 
     #[test]

@@ -602,6 +602,7 @@ mod tests {
             ms_vertex: 1.2,
             ms_raster: 3.4,
             ms_shade: 8.8,
+            ..Default::default()
         };
         let mut fb = Framebuffer::new(960, 540);
         for y in 0..540 {
