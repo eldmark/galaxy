@@ -1,0 +1,5 @@
+target/
+*.png
+!screenshots/*.png
+frames/
+perf.data*
