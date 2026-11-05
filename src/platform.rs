@@ -1,7 +1,10 @@
 //! ÚNICO módulo que importa raylib: ventana, entrada y presentar el framebuffer.
-//! Dueño: agente `ui`. Prohibido usar funciones de dibujo 3D, modelos o cámara de raylib.
+//! Dueño: agente `ui`. Raylib se usa solo para: crear la ventana, leer teclado/ratón, subir el
+//! framebuffer RGBA a una textura 2D y mostrarla escalada. Nada de dibujo 3D, modelos ni cámaras.
+use crate::math::Vec3;
 use crate::raster::Framebuffer;
 use crate::ship::Input;
+use raylib::prelude::*;
 
 /// Estado de entrada de un cuadro.
 #[derive(Default)]
@@ -18,26 +21,286 @@ pub struct UiInput {
     pub toggle_lod: bool,    // F5
     pub screenshot: bool,    // P
     pub quit: bool,
+    /// AÑADIDO. G: gravedad on/off.
+    pub toggle_gravity: bool,
+    /// AÑADIDO. X: asistencia de vuelo on/off.
+    pub toggle_assist: bool,
+    /// AÑADIDO. L: aterrizar automático.
+    pub land_auto: bool,
+    /// AÑADIDO. Teclas 1..6 -> Some(0..=5).
+    pub select_body: Option<usize>,
+    /// AÑADIDO. Delta de ratón (píxeles de ventana) acumulado en el cuadro mientras el botón derecho está pulsado.
+    pub mouse_look: (f32, f32),
+    /// AÑADIDO. Rueda del ratón (positivo = hacia delante).
+    pub scroll: f32,
 }
 
-pub struct Platform {}
+// ------------------------------------------------------------------ lógica pura (sin raylib)
+
+/// Teclas mantenidas pulsadas en este cuadro (independiente de raylib para poder probarlo).
+#[derive(Default, Clone, Copy, Debug)]
+pub struct KeyState {
+    pub w: bool,
+    pub s: bool,
+    pub a: bool,
+    pub d: bool,
+    pub q: bool,
+    pub e: bool,
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+    pub z: bool,
+    pub c: bool,
+    pub shift: bool,
+    pub ctrl: bool,
+    /// Botón derecho pulsado.
+    pub right_mouse: bool,
+    /// Delta del ratón en píxeles de ventana (solo cuenta con `right_mouse`).
+    pub mouse_delta: (f32, f32),
+}
+
+fn axis(pos: bool, neg: bool) -> f32 {
+    (pos as i32 - neg as i32) as f32
+}
+
+/// Píxeles de arrastre que equivalen a giro máximo (1.0) en `rotate`.
+pub const MOUSE_FULL_TURN_PX: f32 = 12.0;
+
+/// Mapea teclas a `ship::Input`. Opuestos se cancelan; todos los valores quedan en [-1, 1].
+/// Convención: thrust.z +1 = adelante (W), thrust.x +1 = derecha (D), thrust.y +1 = arriba (E).
+/// rotate.x +1 = morro arriba (flecha arriba / ratón arriba), rotate.y +1 = guiñada a la izquierda
+/// (flecha izquierda / ratón izquierda), rotate.z +1 = alabeo antihorario visto desde la nave (Z).
+pub fn map_keys(k: &KeyState) -> Input {
+    let thrust = Vec3::new(axis(k.d, k.a), axis(k.e, k.q), axis(k.w, k.s));
+    let mut pitch = axis(k.up, k.down);
+    let mut yaw = axis(k.left, k.right);
+    let roll = axis(k.z, k.c);
+    if k.right_mouse {
+        pitch += -k.mouse_delta.1 / MOUSE_FULL_TURN_PX;
+        yaw += -k.mouse_delta.0 / MOUSE_FULL_TURN_PX;
+    }
+    let cl = |v: f32| if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
+    Input { thrust, rotate: Vec3::new(cl(pitch), cl(yaw), cl(roll)), boost: k.shift, brake: k.ctrl }
+}
+
+/// Rectángulo (x, y, w, h) en píxeles de ventana donde se dibuja el framebuffer
+/// manteniendo la relación de aspecto (barras negras / letterbox).
+pub fn letterbox(win_w: f32, win_h: f32, fb_w: f32, fb_h: f32) -> (f32, f32, f32, f32) {
+    if win_w <= 0.0 || win_h <= 0.0 || fb_w <= 0.0 || fb_h <= 0.0 {
+        return (0.0, 0.0, win_w.max(0.0), win_h.max(0.0));
+    }
+    let scale = (win_w / fb_w).min(win_h / fb_h);
+    let w = fb_w * scale;
+    let h = fb_h * scale;
+    ((win_w - w) * 0.5, (win_h - h) * 0.5, w, h)
+}
+
+/// Convierte una posición de ventana a coordenadas del framebuffer (puede salir de [0, fb) en las barras).
+pub fn window_to_fb(pos: (f32, f32), win: (f32, f32), fb: (f32, f32)) -> (f32, f32) {
+    let (x, y, w, h) = letterbox(win.0, win.1, fb.0, fb.1);
+    if w <= 0.0 || h <= 0.0 {
+        return (0.0, 0.0);
+    }
+    ((pos.0 - x) / w * fb.0, (pos.1 - y) / h * fb.1)
+}
+
+// ------------------------------------------------------------------ ventana raylib
+
+pub struct Platform {
+    // Orden de campos = orden de drop: la textura debe liberarse antes de cerrar la ventana.
+    texture: Texture2D,
+    rl: RaylibHandle,
+    thread: RaylibThread,
+    fb_w: usize,
+    fb_h: usize,
+    frame_time: f64,
+}
 
 impl Platform {
-    pub fn new(_fb_width: usize, _fb_height: usize, _title: &str) -> Self {
-        todo!("ui")
+    pub fn new(fb_width: usize, fb_height: usize, title: &str) -> Self {
+        let (mut rl, thread) = raylib::init()
+            .size(fb_width as i32, fb_height as i32)
+            .title(title)
+            .resizable()
+            .build();
+        rl.set_target_fps(60);
+        rl.set_exit_key(None); // Esc lo gestionamos nosotros (UiInput::quit)
+        rl.set_window_min_size(320, 180);
+        let image = Image::gen_image_color(fb_width as i32, fb_height as i32, Color::BLACK);
+        let texture = rl.load_texture_from_image(&thread, &image).expect("no se pudo crear la textura");
+        Self { rl, thread, texture, fb_w: fb_width, fb_h: fb_height, frame_time: 1.0 / 60.0 }
     }
+
     pub fn should_close(&self) -> bool {
-        todo!("ui")
+        self.rl.window_should_close()
     }
+
     /// Segundos reales del último cuadro.
     pub fn frame_time(&self) -> f64 {
-        todo!("ui")
+        self.frame_time
     }
+
     pub fn poll(&mut self) -> UiInput {
-        todo!("ui")
+        use KeyboardKey::*;
+        self.frame_time = self.rl.get_frame_time() as f64;
+        let rl = &self.rl;
+        let right_mouse = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT);
+        let md = rl.get_mouse_delta();
+        let keys = KeyState {
+            w: rl.is_key_down(KEY_W),
+            s: rl.is_key_down(KEY_S),
+            a: rl.is_key_down(KEY_A),
+            d: rl.is_key_down(KEY_D),
+            q: rl.is_key_down(KEY_Q),
+            e: rl.is_key_down(KEY_E),
+            up: rl.is_key_down(KEY_UP),
+            down: rl.is_key_down(KEY_DOWN),
+            left: rl.is_key_down(KEY_LEFT),
+            right: rl.is_key_down(KEY_RIGHT),
+            z: rl.is_key_down(KEY_Z),
+            c: rl.is_key_down(KEY_C),
+            shift: rl.is_key_down(KEY_LEFT_SHIFT) || rl.is_key_down(KEY_RIGHT_SHIFT),
+            ctrl: rl.is_key_down(KEY_LEFT_CONTROL) || rl.is_key_down(KEY_RIGHT_CONTROL),
+            right_mouse,
+            mouse_delta: (md.x, md.y),
+        };
+        let mp = rl.get_mouse_position();
+        let win = (rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        let digits = [KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX];
+        UiInput {
+            ship: map_keys(&keys),
+            mouse: window_to_fb((mp.x, mp.y), win, (self.fb_w as f32, self.fb_h as f32)),
+            mouse_clicked: rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT),
+            toggle_tour: rl.is_key_pressed(KEY_T),
+            toggle_help: rl.is_key_pressed(KEY_F1),
+            toggle_stats: rl.is_key_pressed(KEY_F3),
+            toggle_culling: rl.is_key_pressed(KEY_F4),
+            toggle_lod: rl.is_key_pressed(KEY_F5),
+            screenshot: rl.is_key_pressed(KEY_P),
+            quit: rl.is_key_pressed(KEY_ESCAPE),
+            toggle_gravity: rl.is_key_pressed(KEY_G),
+            toggle_assist: rl.is_key_pressed(KEY_X),
+            land_auto: rl.is_key_pressed(KEY_L),
+            select_body: digits.iter().position(|&k| rl.is_key_pressed(k)),
+            mouse_look: if right_mouse { (md.x, md.y) } else { (0.0, 0.0) },
+            scroll: rl.get_mouse_wheel_move(),
+        }
     }
-    /// Sube el framebuffer a una textura 2D y lo muestra escalado.
-    pub fn present(&mut self, _fb: &Framebuffer) {
-        todo!("ui")
+
+    /// Sube el framebuffer a una textura 2D y lo muestra escalado (mantiene el aspecto).
+    pub fn present(&mut self, fb: &Framebuffer) {
+        if fb.width != self.fb_w || fb.height != self.fb_h || fb.color.len() != fb.width * fb.height * 4 {
+            return;
+        }
+        let _ = self.texture.update_texture(&fb.color);
+        let win_w = self.rl.get_screen_width() as f32;
+        let win_h = self.rl.get_screen_height() as f32;
+        let (x, y, w, h) = letterbox(win_w, win_h, self.fb_w as f32, self.fb_h as f32);
+        let mut d = self.rl.begin_drawing(&self.thread);
+        d.clear_background(Color::BLACK);
+        d.draw_texture_pro(
+            &self.texture,
+            Rectangle::new(0.0, 0.0, self.fb_w as f32, self.fb_h as f32),
+            Rectangle::new(x, y, w, h),
+            Vector2::new(0.0, 0.0),
+            0.0,
+            Color::WHITE,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opposites_cancel_and_range() {
+        let k = KeyState { w: true, s: true, a: true, d: true, q: true, e: true, up: true, down: true, left: true, right: true, z: true, c: true, ..Default::default() };
+        let i = map_keys(&k);
+        assert_eq!(i.thrust.x, 0.0);
+        assert_eq!(i.thrust.y, 0.0);
+        assert_eq!(i.thrust.z, 0.0);
+        assert_eq!(i.rotate.x, 0.0);
+        assert_eq!(i.rotate.y, 0.0);
+        assert_eq!(i.rotate.z, 0.0);
+    }
+
+    #[test]
+    fn single_keys_and_modifiers() {
+        let i = map_keys(&KeyState { w: true, d: true, e: true, shift: true, ctrl: true, ..Default::default() });
+        assert_eq!((i.thrust.x, i.thrust.y, i.thrust.z), (1.0, 1.0, 1.0));
+        assert!(i.boost && i.brake);
+        let i = map_keys(&KeyState { s: true, a: true, q: true, ..Default::default() });
+        assert_eq!((i.thrust.x, i.thrust.y, i.thrust.z), (-1.0, -1.0, -1.0));
+        assert!(!i.boost && !i.brake);
+    }
+
+    #[test]
+    fn mouse_only_with_right_button_and_clamped() {
+        let none = map_keys(&KeyState { mouse_delta: (50.0, 50.0), ..Default::default() });
+        assert_eq!((none.rotate.x, none.rotate.y), (0.0, 0.0));
+        let big = map_keys(&KeyState { right_mouse: true, mouse_delta: (1e6, -1e6), up: true, left: true, ..Default::default() });
+        for v in [big.rotate.x, big.rotate.y, big.rotate.z] {
+            assert!((-1.0..=1.0).contains(&v));
+        }
+        let nan = map_keys(&KeyState { right_mouse: true, mouse_delta: (f32::NAN, f32::INFINITY), ..Default::default() });
+        assert_eq!((nan.rotate.x, nan.rotate.y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn letterbox_same_aspect_fills() {
+        assert_eq!(letterbox(1920.0, 1080.0, 960.0, 540.0), (0.0, 0.0, 1920.0, 1080.0));
+    }
+
+    #[test]
+    fn letterbox_bars() {
+        // Ventana cuadrada: barras arriba y abajo.
+        let (x, y, w, h) = letterbox(800.0, 800.0, 960.0, 540.0);
+        assert_eq!((x, w), (0.0, 800.0));
+        assert!((h - 450.0).abs() < 1e-3 && (y - 175.0).abs() < 1e-3);
+        // Ventana muy ancha: barras laterales.
+        let (x, y, w, h) = letterbox(2000.0, 540.0, 960.0, 540.0);
+        assert_eq!((y, h), (0.0, 540.0));
+        assert!((w - 960.0).abs() < 1e-3 && (x - 520.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn window_to_fb_mapping() {
+        let fb = (960.0, 540.0);
+        // sin escalado
+        assert_eq!(window_to_fb((100.0, 50.0), (960.0, 540.0), fb), (100.0, 50.0));
+        // escala x2
+        assert_eq!(window_to_fb((200.0, 100.0), (1920.0, 1080.0), fb), (100.0, 50.0));
+        // letterbox vertical: esquina sup-izq del framebuffer en (0,175)
+        let p = window_to_fb((0.0, 175.0), (800.0, 800.0), fb);
+        assert!(p.0.abs() < 1e-3 && p.1.abs() < 1e-3);
+        let p = window_to_fb((800.0, 625.0), (800.0, 800.0), fb);
+        assert!((p.0 - 960.0).abs() < 1e-2 && (p.1 - 540.0).abs() < 1e-2);
+        // en la barra: fuera de rango (negativo)
+        assert!(window_to_fb((10.0, 10.0), (800.0, 800.0), fb).1 < 0.0);
+        // ventana degenerada
+        assert_eq!(window_to_fb((5.0, 5.0), (0.0, 0.0), fb), (0.0, 0.0));
+    }
+
+    /// Prueba manual con ventana real: `cargo test smoke_window -- --ignored`.
+    #[test]
+    #[ignore]
+    fn smoke_window() {
+        let mut p = Platform::new(960, 540, "galaxy smoke");
+        let mut fb = Framebuffer::new(960, 540);
+        let stats = crate::raster::Stats::default();
+        for _ in 0..60 {
+            let inp = p.poll();
+            fb.clear([10, 20, 40]);
+            let st = crate::hud::HudState {
+                mode: "CRUCERO", nearest_body: "VERDALIA", altitude_m: 1234.0, speed_ms: 5.0, tour_active: false,
+                tour_status: "", show_stats: true, show_help: false, stats: &stats, fps: 60.0,
+                culling_on: true, lod_on: true, land_active: false,
+            };
+            crate::hud::draw_hud_layout(&mut fb, &st, inp.mouse);
+            p.present(&fb);
+        }
+        assert!(p.frame_time() > 0.0);
     }
 }
