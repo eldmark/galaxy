@@ -211,7 +211,7 @@ fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, sho
     let near = nearest_body(&sim.bodies, sim.ship.position, sim.t);
     let nb = &sim.bodies[near];
     HudState {
-        mode: if sim.autopilot.active { "AUTOPILOTO" } else { sim.ship.mode.name() },
+        mode: if sim.autopilot.is_trip() { "VIAJE" } else if sim.autopilot.active { "AUTOPILOTO" } else { sim.ship.mode.name() },
         nearest_body: nb.name,
         altitude_m: altitude(nb.position(sim.t), nb.radius, sim.ship.position),
         speed_ms: if sim.ship.mode == crate::ship::NavMode::Landed { 0.0 } else { speed_relative(sim, near) },
@@ -223,7 +223,7 @@ fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, sho
         fps,
         culling_on: opts.frustum_culling,
         lod_on,
-        land_active: sim.autopilot.active && !sim.autopilot.tour,
+        land_active: sim.autopilot.is_landing(),
     }
 }
 
@@ -293,6 +293,9 @@ pub fn run(start_tour: bool) {
         if input.land_auto {
             sim.land_here();
         }
+        if let Some(i) = input.select_body {
+            sim.go_to(i);
+        }
         if input.mouse_clicked {
             if let Some(l) = &layout {
                 if l.tour.contains(input.mouse.0, input.mouse.1) {
@@ -304,7 +307,7 @@ pub fn run(start_tour: bool) {
         }
         let dt = platform.frame_time().clamp(0.0, 0.1);
         sim.frame(dt, &input.ship);
-        cam.update(dt, &sim.ship, 0.0, 0.0, false);
+        cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
         if dt > 1e-4 {
             fps += ((1.0 / dt as f32) - fps) * 0.1;
         }
@@ -314,6 +317,9 @@ pub fn run(start_tour: bool) {
 
         let state = hud_state(&sim, &stats, fps, show_stats, show_help, &opts, lod_on);
         layout = Some(draw_hud_layout(&mut fb, &state, input.mouse));
+        if sim.autopilot.active {
+            crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
+        }
 
         if input.screenshot {
             let _ = std::fs::create_dir_all("screenshots");
