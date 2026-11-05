@@ -5,12 +5,12 @@
 //! - Progresivo: la entrada fija una aceleración/velocidad angular OBJETIVO y el estado la alcanza con
 //!   `x += (obj - x) * (1 - e^(-dt/τ))`, igual en todos los equipos.
 //! - Gravedad: a = GM/(r²+ε²) hacia cada cuerpo dentro de su esfera de influencia (`Body::gravity_at`).
-//! - Colisión: esfera de la nave contra `surface_height`; se reposiciona y se anula la velocidad normal.
+//! - Colisión: esfera de la nave contra `surface_height_at` (relieve real, marco del cuerpo en el instante t); se reposiciona y se anula la velocidad normal.
 //! - Control local: en Orbit/Descent se integra en el marco del planeta (la nave hereda su movimiento).
 use super::modes::*;
 use super::{Input, Ship};
 use crate::math::{DVec3, Quat, Vec3};
-use crate::world::{altitude, cross, rot_y, smoothstep01, surface_height, Body};
+use crate::world::{altitude, cross, rot_y, smoothstep01, surface_height_at, terrain_altitude, Body};
 
 pub fn q_rot(q: Quat, v: DVec3) -> DVec3 {
     q.rotate(v.to_f32()).to_f64()
@@ -306,7 +306,7 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
 
     // altitud de referencia para HUD
     s.altitude = match nearest_planet(bodies, s.position, t1) {
-        Some((i, _)) => altitude(bodies[i].position(t1), bodies[i].radius, s.position),
+        Some((i, _)) => terrain_altitude(&bodies[i], t1, s.position),
         None => f64::MAX,
     };
     update_gear(s, dt);
@@ -320,7 +320,7 @@ fn collide(s: &mut Ship, dt: f64, t1: f64, bodies: &[Body]) -> bool {
         let rel = s.position - pb;
         let dist = rel.length();
         let n = if dist > 1e-6 { rel * (1.0 / dist) } else { DVec3::new(0.0, 1.0, 0.0) };
-        let min_d = surface_height(b, n) + SHIP_RADIUS;
+        let min_d = surface_height_at(b, t1, n) + SHIP_RADIUS;
         if dist >= min_d {
             continue;
         }
@@ -370,7 +370,7 @@ fn step_landed(s: &mut Ship, dt: f64, t1: f64, bodies: &[Body]) {
     level_toward(s, rel.normalized(), expk(dt, 0.8));
     s.angular_velocity = Vec3::ZERO;
     s.accel = DVec3::ZERO;
-    s.altitude = rel.length() - b.radius;
+    s.altitude = terrain_altitude(b, t1, s.position);
 }
 
 fn update_gear(s: &mut Ship, dt: f64) {
@@ -478,7 +478,8 @@ mod tests {
                 s.step(1.0 / 120.0, t, &i2, &bodies);
                 t += 1.0 / 120.0;
                 for bb in &bodies {
-                    let d = (s.position - bb.position(t)).length() - bb.radius;
+                    // altitud sobre el terreno real (con relieve), no sobre la esfera lisa
+                    let d = terrain_altitude(bb, t, s.position);
                     assert!(d >= SHIP_RADIUS - 1e-6, "dentro de {} paso {step}: {d}", bb.name);
                 }
             }

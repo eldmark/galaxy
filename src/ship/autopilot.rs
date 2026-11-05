@@ -8,7 +8,7 @@ use super::modes::*;
 use super::physics::{corotation_blend, effective_gravity, q_rot, q_rot_inv};
 use super::{Input, NavMode, Ship};
 use crate::math::{DVec3, Quat, Vec3};
-use crate::world::{altitude, cross, smoothstep01, surface_height, Body, TAU};
+use crate::world::{altitude, cross, smoothstep01, surface_height_at, Body, TAU};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -352,7 +352,7 @@ impl Autopilot {
                 let d_world = rel.normalized();
                 self.d0 = b.world_to_fixed(t, d_world);
                 self.site = self.site_for(self.target, self.d0);
-                self.alt0 = rel.length() - surface_height(b, d_world);
+                self.alt0 = rel.length() - surface_height_at(b, t, d_world);
                 self.desc_total = (10.0 + self.alt0 / 300.0).clamp(12.0, 40.0);
                 if self.alt0 < 2.0 * FLARE_ALT {
                     self.phase = Phase::Land;
@@ -361,7 +361,7 @@ impl Autopilot {
                 }
             }
             Phase::Land => {
-                self.alt_ref = rel.length() - surface_height(b, rel.normalized());
+                self.alt_ref = rel.length() - surface_height_at(b, t, rel.normalized());
             }
             _ => {}
         }
@@ -524,7 +524,7 @@ impl Autopilot {
                     let dir = slerp(d0, site, e);
                     let alt = FLARE_ALT + (alt0 - FLARE_ALT) * (1.0 - e).powf(1.5);
                     let wd = b.fixed_to_world(tt, dir);
-                    b.position(tt) + wd * (surface_height(b, wd) + alt)
+                    b.position(tt) + wd * (surface_height_at(b, tt, wd) + alt)
                 };
                 let a = self.track(ship, bodies, t, pref);
                 let n = self.radial_up(ship, b, t);
@@ -547,7 +547,7 @@ impl Autopilot {
                 let pref = move |tt: f64| {
                     let alt = alt_ref - v_down * (tt - t_now);
                     let wd = b.fixed_to_world(tt, site);
-                    b.position(tt) + wd * (surface_height(b, wd) + alt)
+                    b.position(tt) + wd * (surface_height_at(b, tt, wd) + alt)
                 };
                 let a = self.track(ship, bodies, t, pref);
                 let n = self.radial_up(ship, b, t);
