@@ -1,9 +1,13 @@
 #![allow(dead_code)]
 
 mod app;
+mod demos;
+mod fx;
 mod geometry;
 mod hud;
 mod math;
+mod orbits;
+mod particles;
 mod platform;
 mod png;
 mod raster;
@@ -32,8 +36,14 @@ fn main() {
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
+             galaxy --orbits-shot out.png     lineas de orbita vistas desde arriba\n\
+             galaxy --death-shot DIR          acercarse al sol hasta morir (cuadros PNG)\n\
+             galaxy --landing-shot DIR        aterrizaje asistido con polvo (cuadros PNG)\n\
              galaxy --terrain-shot out.png [--alt M] [--kind verdalia]   terreno con LOD (demo)"
         );
+        return;
+    }
+    if demos::dispatch(&args) {
         return;
     }
     if let Some(out) = arg_value(&args, "--shot") {

@@ -27,6 +27,10 @@ pub struct UiInput {
     pub toggle_assist: bool,
     /// AÑADIDO. L: aterrizar automático.
     pub land_auto: bool,
+    /// AÑADIDO. O: mostrar/ocultar las líneas de órbita.
+    pub toggle_orbits: bool,
+    /// AÑADIDO. K o Supr: reaparecer manualmente.
+    pub respawn: bool,
     /// AÑADIDO. Teclas 1..6 -> Some(0..=5).
     pub select_body: Option<usize>,
     /// AÑADIDO. Delta de ratón (píxeles de ventana) acumulado en el cuadro mientras el botón derecho está pulsado
@@ -205,6 +209,8 @@ impl Platform {
             toggle_gravity: rl.is_key_pressed(KEY_G),
             toggle_assist: rl.is_key_pressed(KEY_X),
             land_auto: rl.is_key_pressed(KEY_L),
+            toggle_orbits: rl.is_key_pressed(KEY_O),
+            respawn: rl.is_key_pressed(KEY_K) || rl.is_key_pressed(KEY_DELETE),
             select_body: digits.iter().position(|&k| rl.is_key_pressed(k)),
             mouse_look: if right_mouse { (md.x, md.y) } else { (0.0, 0.0) },
             free_look: right_mouse,

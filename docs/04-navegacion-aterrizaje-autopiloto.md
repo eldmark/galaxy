@@ -143,3 +143,12 @@ El enunciado exige poder orientar la nave y ver el entorno durante el acercamien
 | `1`-`6` | Viaje automático al cuerpo (1 = sol): alinear, tránsito, aproximar y una vuelta de órbita |
 | `F1` ayuda, `F3` estadísticas, `F4` culling, `F5` LOD, `N` normal map |
 | `P` | Captura PNG |
+
+## Actualización (flight): sin tope en crucero, sol, órbitas y aterrizaje asistido
+
+- **Crucero sin tope**: mantener el empuje sigue subiendo la velocidad (solo hay un límite numérico de 200 km/s). El boost sostenido sube el multiplicador de aceleración de 1.5 a 8 con constante de 6 s (`Ship::boost_charge`); el Tour usa 1.5 fijo. En ORBITA y DESCENSO se conserva `v_max = k·altitud`; el exceso al entrar se recorta con exceso/1.5 s y tope de 4000 m/s² (`LOCAL_DECEL_MAX`).
+- **Colisión continua**: si un paso mueve más de 30 m se recorre el segmento con muestras de ~6 m (`physics::sweep_collisions`); la zona letal del sol usa intersección segmento-esfera.
+- **Gravedad**: el sol atrae (g superficie 30 m/s², influencia 3R, atenuación desde 0.9). Dentro de un marco local solo cuenta el planeta del marco. Sin asistencia no hay co-rotación fuerte, así que una órbita libre a 1.5R conserva su radio (±0.1 % en 5 min).
+- **El sol mata**: < 1.5R destruye; 1.5R-2.3R sube la temperatura (HUD, tinte), con daño de casco solo por encima de 55 % de calor. Impacto normal > 120 m/s destruye; 12-120 m/s rebota con daño. Reaparición a los 4 s (K o Supr manual).
+- **Aterrizaje asistido**: en DESCENSO, bajo 250 m, bajando a < 60 m/s y < 80 m/s horizontal, sin mandos, arranca solo; cualquier mando lo cancela y lo bloquea 3 s.
+- Tecla `O`: líneas de órbita (`src/orbits.rs`). Efectos en `src/particles.rs` y `src/fx.rs`. Modos `--orbits-shot`, `--death-shot`, `--landing-shot` (`src/demos.rs`).
