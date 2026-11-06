@@ -23,7 +23,7 @@ mod volcanic;
 pub use giant::GiantShader;
 pub use ice::IceShader;
 pub use pixel::PixelShader;
-pub use props::{RingShader, ShipShader};
+pub use props::{PropShader, RingShader, ShipShader};
 pub use rocky::RockyShader;
 pub use sky::sky_color;
 pub use sun::SunShader;
@@ -86,6 +86,11 @@ pub fn shader_for_ring() -> Box<dyn FragmentShader> {
 /// Shader de la nave del jugador.
 pub fn ship_shader() -> Box<dyn FragmentShader> {
     Box::new(ShipShader)
+}
+
+/// Shader de los objetos de superficie (árboles, espiras, cristales, edificios).
+pub fn prop_shader() -> Box<dyn FragmentShader> {
+    Box::new(PropShader)
 }
 
 #[cfg(test)]

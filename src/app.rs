@@ -7,7 +7,7 @@ use crate::hud::{HudLayout, HudState, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
 use crate::raster::{DrawCall, Framebuffer, FragmentShader, RenderOptions, Stats, Uniforms, render_scene};
-use crate::shading::{shader_for, shader_for_ring, ship_shader, sky_color};
+use crate::shading::{prop_shader, shader_for, shader_for_ring, ship_shader, sky_color};
 use crate::ship::{CameraRig, Input, Sim};
 use crate::world::{altitude, body_model_matrix, nearest_body, solar_system};
 use rayon::prelude::*;
@@ -131,6 +131,10 @@ pub struct Scene {
     use_terrain: Vec<bool>,
     /// Triángulos de terreno seleccionados en el último cuadro (para el HUD y las mediciones).
     pub terrain_triangles: u32,
+    /// Objetos en superficie (árboles, espiras...): un `Scatter` por cuerpo con terreno, shader y contadores.
+    scatters: Vec<Option<crate::scatter::Scatter>>,
+    prop_shader: Box<dyn FragmentShader>,
+    pub scatter_stats: crate::scatter::ScatterStats,
 }
 
 impl Scene {
@@ -149,6 +153,14 @@ impl Scene {
             terrains: bodies.iter().map(|b| b.landable.then(|| Terrain::new(b.kind, b.radius, TERRAIN_MAX_LEVEL))).collect(),
             use_terrain: vec![false; bodies.len()],
             terrain_triangles: 0,
+            scatters: {
+                // GALAXY_NO_SCATTER=1 desactiva los objetos (para medir su costo con --bench).
+                let models = Arc::new(crate::scatter::Models::load("assets/models").expect("faltan los modelos de assets/models"));
+                let on = std::env::var_os("GALAXY_NO_SCATTER").is_none();
+                bodies.iter().map(|b| if on { crate::scatter::Scatter::new(b.kind, b.radius, crate::scatter::global_seed(), models.clone()) } else { None }).collect()
+            },
+            prop_shader: prop_shader(),
+            scatter_stats: Default::default(),
         }
     }
 
@@ -181,7 +193,8 @@ impl Scene {
         let q = cam.orientation();
         let (fwd_w, up_w) = (q.rotate(Vec3::new(0.0, 0.0, -1.0)).to_f64(), q.rotate(Vec3::Y).to_f64());
         let aspect = fb.width as f64 / fb.height as f64;
-        let mut chunk_sets: Vec<(usize, Vec<(ChunkKey, Arc<Mesh>)>)> = Vec::new();
+        let mut chunk_sets: Vec<(usize, Vec<(ChunkKey, Arc<Mesh>)>, Vec<(ChunkKey, Arc<Mesh>)>)> = Vec::new();
+        self.scatter_stats = Default::default();
         self.terrain_triangles = 0;
         for (i, b) in sim.bodies.iter().enumerate() {
             let Some(terrain) = self.terrains[i].as_mut() else { continue };
@@ -194,7 +207,16 @@ impl Scene {
             let frustum = Frustum::from_camera(cam_local, b.world_to_fixed(sim.t, fwd_w), b.world_to_fixed(sim.t, up_w), FOV_Y as f64, aspect);
             let chunks = terrain.frame(cam_local, FOV_Y as f64, fb.height as f64, Some(&frustum));
             self.terrain_triangles += terrain.stats.triangles;
-            chunk_sets.push((i, chunks));
+            let props = match self.scatters[i].as_mut() {
+                Some(sc) => {
+                    let keys: Vec<ChunkKey> = chunks.iter().map(|c| c.0).collect();
+                    let p = sc.frame(&keys, cam_local);
+                    self.scatter_stats.add(&sc.stats);
+                    p
+                }
+                None => Vec::new(),
+            };
+            chunk_sets.push((i, chunks, props));
         }
 
         let mut calls: Vec<DrawCall> = Vec::new();
@@ -224,7 +246,7 @@ impl Scene {
             }
         }
         // Chunks de terreno: mallas en metros locales, modelo = traslación relativa al ojo * rotación del planeta (sin escala).
-        for (i, chunks) in &chunk_sets {
+        for (i, chunks, props) in &chunk_sets {
             let b = &sim.bodies[*i];
             let model = Mat4::translation((b.position(sim.t) - eye).to_f32()) * Mat4::rotation_y(b.rotation_angle(sim.t) as f32);
             let light = (-b.position(sim.t)).normalized().to_f32();
@@ -233,6 +255,15 @@ impl Scene {
                     mesh: mesh.as_ref(),
                     model,
                     shader: self.shaders[*i].as_ref(),
+                    uniforms: Uniforms { light_dir: light, time, detail: 1.0, model },
+                });
+            }
+            // Objetos de superficie: una malla horneada por chunk, en el mismo espacio local y con el MISMO model.
+            for (_, mesh) in props {
+                calls.push(DrawCall {
+                    mesh: mesh.as_ref(),
+                    model,
+                    shader: self.prop_shader.as_ref(),
                     uniforms: Uniforms { light_dir: light, time, detail: 1.0, model },
                 });
             }
