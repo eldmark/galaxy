@@ -42,3 +42,14 @@ impl FragmentShader for ShipShader {
         finish([f.color[0] * k + spec, f.color[1] * k + spec, f.color[2] * k + spec])
     }
 }
+
+/// Objetos de superficie (árboles, espiras, cristales, edificios): Lambert con luz ambiente 0.25 sobre el color de vértice.
+pub struct PropShader;
+
+impl FragmentShader for PropShader {
+    fn shade(&self, f: &FragIn, u: &Uniforms) -> [f32; 3] {
+        let d = f.normal.dot(u.light_dir).max(0.0);
+        let k = 0.25 + 0.75 * d;
+        finish([f.color[0] * k, f.color[1] * k, f.color[2] * k])
+    }
+}

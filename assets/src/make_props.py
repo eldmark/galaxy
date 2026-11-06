@@ -1,4 +1,4 @@
-"""Genera props de superficie: tree.obj, obsidian.obj, ice_crystal.obj (origen en la base, +Y arriba)."""
+"""Genera props de superficie: tree.obj, obsidian.obj, ice_crystal.obj, building.obj (origen en la base, +Y arriba)."""
 import os, sys, math
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from meshlib import *
@@ -41,8 +41,27 @@ def ice():
     cr(0.2, -0.9, 1.5, 0.35, 0.3, 0.2, (0.80, 0.94, 1.0))
     return m
 
+def building():
+    """Monumento pixelado de Mutante: una cabeza de vaca hecha de cubos apilados (~8 m de alto, 6 m de lado).
+    Frente hacia +Z. Todo son cajas alineadas a los ejes, como un pixel art en 3D."""
+    m = Mesh()
+    cream, dark, pink, stone = (0.92, 0.90, 0.84), (0.10, 0.10, 0.13), (0.95, 0.60, 0.68), (0.42, 0.44, 0.52)
+    m.add("base", box(-3.0, 3.0, 0.0, 1.5, -3.0, 3.0), stone, 0.02)
+    m.add("head", box(-2.5, 2.5, 1.5, 6.0, -2.25, 2.25), cream, 0.02)
+    m.add("patch", box(-2.55, -0.6, 3.6, 5.6, -0.4, 2.3), dark, 0.02)     # mancha oscura de vaca (sobresale 5 cm)
+    m.add("ear", box(-3.4, -2.5, 5.0, 6.4, -0.8, 0.8), cream, 0.02)
+    m.add("ear", box(2.5, 3.4, 5.0, 6.4, -0.8, 0.8), cream, 0.02)
+    m.add("horn", box(-2.2, -1.2, 6.0, 8.0, -0.5, 0.5), dark, 0.02)
+    m.add("horn", box(1.2, 2.2, 6.0, 8.0, -0.5, 0.5), dark, 0.02)
+    m.add("snout", box(-1.6, 1.6, 1.5, 3.3, 2.25, 3.4), pink, 0.02)
+    m.add("nostril", box(-1.0, -0.4, 2.0, 2.7, 3.4, 3.5), dark, 0.0)
+    m.add("nostril", box(0.4, 1.0, 2.0, 2.7, 3.4, 3.5), dark, 0.0)
+    m.add("eye", box(-1.9, -1.1, 4.3, 5.1, 2.25, 2.35), dark, 0.0)
+    m.add("eye", box(1.1, 1.9, 4.3, 5.1, 2.25, 2.35), dark, 0.0)
+    return m
+
 if __name__ == "__main__":
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models")
-    for fn, mk in (("tree.obj", tree), ("obsidian.obj", obsidian), ("ice_crystal.obj", ice)):
+    for fn, mk in (("tree.obj", tree), ("obsidian.obj", obsidian), ("ice_crystal.obj", ice), ("building.obj", building)):
         m = mk(); m.write(os.path.join(out, fn), fn[:-4])
         print(fn, len(m.F), "tris")

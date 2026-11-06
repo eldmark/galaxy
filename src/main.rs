@@ -8,10 +8,12 @@ mod platform;
 mod png;
 mod raster;
 mod relief;
+mod scatter;
 mod shading;
 mod ship;
 mod shipmodel;
 mod shot;
+mod surface_shot;
 mod terrain;
 mod world;
 
@@ -32,8 +34,17 @@ fn main() {
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
+             galaxy [--seed N]               semilla de la distribución de objetos en superficie (por defecto 1)\n\
+             galaxy --surface-shot out.png --body verdalia --alt 40 [--seed N] [--time T]   suelo con árboles/espiras/cristales/edificios\n\
              galaxy --terrain-shot out.png [--alt M] [--kind verdalia]   terreno con LOD (demo)"
         );
+        return;
+    }
+    if let Some(seed) = arg_value(&args, "--seed").and_then(|n| n.parse().ok()) {
+        scatter::set_global_seed(seed);
+    }
+    if let Some(out) = arg_value(&args, "--surface-shot") {
+        surface_shot::run(Path::new(&out), &args);
         return;
     }
     if let Some(out) = arg_value(&args, "--shot") {
