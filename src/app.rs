@@ -17,7 +17,7 @@ use std::time::Instant;
 pub const WIDTH: usize = 960;
 pub const HEIGHT: usize = 540;
 pub const FOV_Y: f32 = 1.0;
-const NEAR: f32 = 1.0;
+pub const NEAR: f32 = 1.0;
 const FAR: f32 = 600_000.0;
 const LOD_MARGIN: f32 = 0.25;
 /// Altitud (en radios) a la que se cambia de esfera a terreno con chunks, con histéresis.
@@ -114,6 +114,8 @@ pub fn new_sim() -> Sim {
     let vel = bodies[2].velocity(0.0);
     let mut sim = Sim::new(bodies, start);
     sim.ship.velocity = vel;
+    let r = sim.bodies[2].radius;
+    sim.set_spawn(2, DVec3::new(0.0, 0.0, r * 4.5));
     sim
 }
 
@@ -273,7 +275,9 @@ impl Scene {
         let ship_model = Mat4::translation(rel) * sim.ship.orientation.to_mat4();
         let sun_dir = (-sim.ship.position).normalized().to_f32();
         let ship_uniforms = Uniforms { light_dir: sun_dir, time, detail: 1.0, model: ship_model };
-        calls.extend(self.ship.draw_calls(ship_model, sim.ship.gear, self.ship_shader.as_ref(), ship_uniforms));
+        if sim.is_alive() {
+            calls.extend(self.ship.draw_calls(ship_model, sim.ship.gear, self.ship_shader.as_ref(), ship_uniforms));
+        }
         render_scene(fb, view, proj, &calls, opts, stats);
         crate::atmosphere::apply(fb, view, FOV_Y, eye, &sim.bodies, sim.t);
     }
@@ -319,15 +323,19 @@ pub fn record(dir: &str, frames: u32, every: u32) {
     sim.start_tour();
     let mut fb = Framebuffer::new(WIDTH, HEIGHT);
     let opts = RenderOptions::default();
+    let mut fx = crate::fx::FlightFx::new();
     for f in 0..frames {
         sim.frame(1.0 / 60.0, &Input::default());
         cam.update(1.0 / 60.0, &sim.ship, 0.0, 0.0, false);
+        fx.update(&mut sim, &mut cam, 1.0 / 60.0, false, false);
         if f % every != 0 {
             continue;
         }
         let mut stats = Stats::default();
         scene.render(&mut fb, &sim, &cam, &opts, true, &mut stats);
+        fx.draw_world(&mut fb, &sim, &cam);
         draw_hud_layout(&mut fb, &hud_state(&sim, &stats, 60.0, true, false, &opts, true), (-1.0, -1.0));
+        fx.draw_hud(&mut fb, &sim);
         let path = format!("{dir}/frame-{:06}.png", f / every);
         fb.save_png(Path::new(&path)).expect("no se pudo guardar el cuadro");
     }
@@ -347,6 +355,7 @@ pub fn run(start_tour: bool) {
     let mut fps = 60.0f32;
     let mut layout: Option<HudLayout> = None;
     let mut shots = 0u32;
+    let mut fx = crate::fx::FlightFx::new();
     if start_tour {
         sim.start_tour();
     }
@@ -393,18 +402,21 @@ pub fn run(start_tour: bool) {
         let dt = platform.frame_time().clamp(0.0, 0.1);
         sim.frame(dt, &input.ship);
         cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
+        fx.update(&mut sim, &mut cam, dt, input.toggle_orbits, input.respawn);
         if dt > 1e-4 {
             fps += ((1.0 / dt as f32) - fps) * 0.1;
         }
 
         let mut stats = Stats::default();
         scene.render(&mut fb, &sim, &cam, &opts, lod_on, &mut stats);
+        fx.draw_world(&mut fb, &sim, &cam);
 
         let state = hud_state(&sim, &stats, fps, show_stats, show_help, &opts, lod_on);
         layout = Some(draw_hud_layout(&mut fb, &state, input.mouse));
         if sim.autopilot.active {
             crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
         }
+        fx.draw_hud(&mut fb, &sim);
 
         if input.screenshot {
             let _ = std::fs::create_dir_all("screenshots");

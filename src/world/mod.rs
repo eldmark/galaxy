@@ -27,7 +27,7 @@ pub struct Body {
     pub inclination: f64,
     /// Fase inicial (rad).
     pub phase: f64,
-    /// Parámetro gravitacional GM (m^3/s^2), valores de jugabilidad, no físicos.
+    /// Parámetro gravitacional GM (m^3/s^2), valores de jugabilidad, no físicos (el sol también atrae: g_superficie ~30 m/s²).
     pub gm: f64,
     pub landable: bool,
 }
@@ -84,8 +84,26 @@ impl Body {
         if self.rotation_period <= 0.0 { 0.0 } else { TAU / self.rotation_period }
     }
     /// Esfera de influencia gravitatoria (m). Fuera de ella no atrae.
+    /// Planetas: 8R. El sol: 3R (la órbita más interna, Fornax, queda en 2.75R pero dentro de su marco local solo
+    /// cuenta la gravedad del planeta; ver `ship::physics::effective_gravity`).
     pub fn influence_radius(&self) -> f64 {
-        8.0 * self.radius
+        if self.kind == BodyKind::Sun { 3.0 * self.radius } else { 8.0 * self.radius }
+    }
+    /// Fracción de la esfera de influencia donde empieza la atenuación (planetas 0.75; sol 0.9 para que 2.5R tenga
+    /// gravedad casi completa y se pueda orbitar).
+    pub fn gravity_fade_start(&self) -> f64 {
+        if self.kind == BodyKind::Sun { 0.9 } else { 0.75 }
+    }
+    /// Velocidad circular de referencia a distancia `r` del centro: v = sqrt(GM·r/(r²+ε²)) (la que mantiene una órbita
+    /// circular con la gravedad del juego). 0 si no hay gravedad.
+    pub fn circular_speed(&self, r: f64) -> f64 {
+        if self.gm <= 0.0 || r <= 0.0 {
+            return 0.0;
+        }
+        let eps = self.gravity_epsilon();
+        let fade_start = self.gravity_fade_start();
+        let fade = 1.0 - smoothstep01((r / self.influence_radius() - fade_start) / (1.0 - fade_start));
+        (self.gm * r * r / (r * r + eps * eps) * fade / r).max(0.0).sqrt()
     }
     /// Suavizado ε de la gravedad (m): a = GM / (r² + ε²).
     pub fn gravity_epsilon(&self) -> f64 {
@@ -104,7 +122,8 @@ impl Body {
             return DVec3::ZERO;
         }
         let eps = self.gravity_epsilon();
-        let fade = 1.0 - smoothstep01((r / infl - 0.75) / 0.25);
+        let fs = self.gravity_fade_start();
+        let fade = 1.0 - smoothstep01((r / infl - fs) / (1.0 - fs));
         d * (self.gm / (r * r + eps * eps) * fade / r)
     }
     /// Vector del marco del mundo a partir de coordenadas fijas al cuerpo (gira con él).
@@ -185,7 +204,7 @@ pub fn solar_system() -> Vec<Body> {
     // Jugabilidad: gravedad superficial ~30 m/s^2 (gm = 30 R^2); planetas se mueven ~280 m/s.
     let g = |r: f64| 30.0 * r * r;
     vec![
-        b(Sun, "Ignea", 8000.0, 0.0, 0.0, 240.0, 0.0, 0.0, 0.0, false),
+        b(Sun, "Ignea", 8000.0, 0.0, 0.0, 240.0, 0.0, 0.0, g(8000.0), false),
         b(Fornax, "Fornax", 3000.0, 22000.0, 500.0, 70.0, 0.05, 0.5, g(3000.0), true),
         b(Verdalia, "Verdalia", 3500.0, 35000.0, 800.0, 90.0, 0.08, 2.0, g(3500.0), true),
         b(Mutante, "Mutante", 2000.0, 55000.0, 1200.0, 60.0, 0.10, 4.0, g(2000.0), true),
@@ -223,5 +242,33 @@ mod tests {
         let v = rot_y(DVec3::new(1.0, 2.0, 3.0), 0.7);
         let m = crate::math::Mat4::rotation_y(0.7).transform_dir(crate::math::Vec3::new(1.0, 2.0, 3.0));
         assert!((v.to_f32() - m).length() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod gravity_tests {
+    use super::*;
+
+    #[test]
+    fn sun_has_gravity_and_bounded_influence() {
+        let sys = solar_system();
+        let sun = &sys[0];
+        assert!(sun.gm > 0.0);
+        let g_surf = sun.gravity_at(DVec3::ZERO, DVec3::new(sun.radius, 0.0, 0.0)).length();
+        assert!((g_surf - 30.0).abs() < 3.0, "g superficie {g_surf}");
+        assert_eq!(sun.gravity_at(DVec3::ZERO, DVec3::new(3.0 * sun.radius, 0.0, 0.0)).length(), 0.0);
+        // a 2.5R todavía hay gravedad apreciable y velocidad circular razonable
+        let v = sun.circular_speed(2.5 * sun.radius);
+        assert!(v > 200.0 && v < 450.0, "vc sol 2.5R = {v}");
+    }
+
+    #[test]
+    fn circular_speed_matches_gravity() {
+        for b in solar_system().iter() {
+            let r = 1.5 * b.radius;
+            let a = b.gravity_at(DVec3::ZERO, DVec3::new(r, 0.0, 0.0)).length();
+            let v = b.circular_speed(r);
+            assert!((v * v / r - a).abs() < 1e-6 * a.max(1.0), "{}", b.name);
+        }
     }
 }

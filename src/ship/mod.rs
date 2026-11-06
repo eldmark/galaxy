@@ -4,6 +4,9 @@ use crate::world::Body;
 
 pub mod autopilot;
 pub mod camera;
+pub mod hazard;
+#[cfg(test)]
+mod flight_tests;
 #[cfg(test)]
 mod feel;
 pub mod modes;
@@ -14,6 +17,7 @@ pub mod stepper;
 pub use autopilot::Autopilot;
 pub use camera::CameraRig;
 pub use modes::NavMode;
+pub use hazard::{DeathCause, ShipStatus, SimEvent};
 pub use sim::Sim;
 pub use stepper::FixedStepper;
 
@@ -79,6 +83,8 @@ pub struct Ship {
     pub landed_local: DVec3,
     pub alt_target: Option<f64>,
     pub takeoff_cooldown: f64,
+    /// Segundos de boost sostenido (sube la aceleración estilo warp; decae al soltar). Solo la física la modifica.
+    pub boost_charge: f64,
 }
 
 impl Ship {
@@ -105,6 +111,7 @@ impl Ship {
             landed_local: DVec3::ZERO,
             alt_target: None,
             takeoff_cooldown: 0.0,
+            boost_charge: 0.0,
         }
     }
 

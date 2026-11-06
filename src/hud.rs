@@ -412,7 +412,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 19] = [
+pub const HELP_ROWS: [(&str, &str); 21] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
@@ -427,6 +427,8 @@ pub const HELP_ROWS: [(&str, &str); 19] = [
     ("T", "Tour automatico"),
     ("L", "Aterrizar automatico"),
     ("1 - 6", "Viajar al cuerpo (1=sol)"),
+    ("O", "Lineas de orbita on/off"),
+    ("K / SUPR", "Reaparecer"),
     ("F1", "Esta ayuda"),
     ("F3 / F4 / F5", "Stats / culling / LOD"),
     ("N", "Mapa de normales on/off"),
@@ -449,6 +451,130 @@ fn draw_help(fb: &mut Framebuffer) {
         draw_text_shadow(fb, r.x + 16 + 13 * 12, y, d, COL_TEXT, 2);
     }
     draw_text_shadow(fb, r.x + 16, r.y + r.h - 22, "F1 PARA CERRAR", COL_DIM, 1);
+}
+
+// ---------------------------------------------------------------- HUD de vuelo (órbita, calor, aterrizaje, muerte)
+const COL_DANGER: [u8; 3] = [255, 90, 60];
+
+/// Datos del HUD de vuelo (los arma `fx::FlightFx::hud`).
+#[derive(Clone, Debug, Default)]
+pub struct FlightHud {
+    /// Temperatura 0..1 y casco 1..0.
+    pub heat: f32,
+    pub hull: f32,
+    /// Referencia orbital: (cuerpo, velocidad actual, velocidad circular, estable).
+    pub orbit: Option<(String, f64, f64, bool)>,
+    /// Hay un autopiloto en marcha, para colocar los paneles debajo del de navegación.
+    pub nav_panel: bool,
+    /// Aterrizaje asistido en marcha y altitud sobre el suelo (m).
+    pub landing_assist: bool,
+    pub altitude: f64,
+    /// Mostrar la barra de altitud (DESCENSO por debajo de 250 m).
+    pub show_alt_bar: bool,
+    /// Mensaje de destrucción y segundos para reaparecer.
+    pub dead: Option<(&'static str, f64)>,
+    /// Segundos de simulación (parpadeo de avisos).
+    pub time: f64,
+}
+
+/// Barra horizontal con relleno 0..1 y color.
+fn bar(fb: &mut Framebuffer, r: Rect, frac: f32, rgb: [u8; 3]) {
+    fill_rect(fb, r, [0, 0, 0], 140);
+    let fw = ((r.w - 2) as f32 * frac.clamp(0.0, 1.0)) as i32;
+    if fw > 0 {
+        fill_rect(fb, Rect { x: r.x + 1, y: r.y + 1, w: fw, h: r.h - 2 }, rgb, 235);
+    }
+    stroke_rect(fb, r, COL_BORDER, 220);
+}
+
+pub fn draw_flight_hud(fb: &mut Framebuffer, s: &FlightHud) {
+    let w = fb.width as i32;
+    let h = fb.height as i32;
+    // --- temperatura (arriba al centro)
+    if s.heat > 0.01 {
+        let r = Rect { x: (w - 260) / 2, y: 8, w: 260, h: 44 };
+        panel(fb, r);
+        draw_text_shadow(fb, r.x + 8, r.y + 6, "TEMPERATURA", COL_DIM, 2);
+        let pct = format!("{:.0}%", s.heat * 100.0);
+        draw_text_shadow(fb, r.x + r.w - 8 - text_width(&pct, 2), r.y + 6, &pct, COL_TEXT, 2);
+        let col = if s.heat < 0.4 { COL_WARN } else { COL_DANGER };
+        bar(fb, Rect { x: r.x + 8, y: r.y + 26, w: r.w - 16, h: 12 }, s.heat, col);
+        if s.heat > 0.3 && ((s.time * 3.0) as i64) % 2 == 0 {
+            let m = "PELIGRO: CALOR EXTREMO";
+            draw_text_shadow(fb, (w - text_width(m, 2)) / 2, r.y + 52, m, COL_DANGER, 2);
+        }
+        if s.hull < 0.999 {
+            let t = format!("CASCO {:.0}%", s.hull * 100.0);
+            draw_text_shadow(fb, (w - text_width(&t, 1)) / 2, r.y + 72, &t, COL_WARN, 1);
+        }
+    } else if s.hull < 0.999 {
+        let t = format!("CASCO {:.0}%", s.hull * 100.0);
+        draw_text_shadow(fb, (w - text_width(&t, 2)) / 2, 10, &t, COL_WARN, 2);
+    }
+
+    // --- órbita (bajo la telemetría)
+    if let Some((name, v, vc, stable)) = &s.orbit {
+        let y0 = 8 + 10 + 4 * 18 + 6 + if s.nav_panel { 10 + 3 * 18 + 6 } else { 0 };
+        let r = Rect { x: 8, y: y0, w: 232, h: 10 + 4 * 18 + 8 };
+        panel(fb, r);
+        let rows = [("REF", name.clone(), COL_ACCENT), ("V ACT", format_speed(*v), COL_TEXT), ("V CIRC", format_speed(*vc), COL_TEXT)];
+        for (i, (k, val, c)) in rows.iter().enumerate() {
+            let y = r.y + 6 + i as i32 * 18;
+            draw_text_shadow(fb, 16, y, k, COL_DIM, 2);
+            draw_text_shadow(fb, 16 + 80, y, val, *c, 2);
+        }
+        // escala v/vc de 0 a 2: marca central = velocidad circular, zona verde = +-10 %
+        let ratio = if *vc > 1.0 { (*v / *vc) as f32 } else { 0.0 };
+        let b = Rect { x: r.x + 8, y: r.y + 6 + 3 * 18 + 2, w: r.w - 16, h: 10 };
+        fill_rect(fb, b, [0, 0, 0], 140);
+        let px = |q: f32| b.x + (b.w as f32 * (q / 2.0).clamp(0.0, 1.0)) as i32;
+        fill_rect(fb, Rect { x: px(0.9), y: b.y, w: (px(1.1) - px(0.9)).max(1), h: b.h }, COL_GOOD, 90);
+        fill_rect(fb, Rect { x: px(1.0), y: b.y - 2, w: 1, h: b.h + 4 }, COL_TEXT, 255);
+        let mk = px(ratio);
+        let col = if *stable { COL_GOOD } else { COL_WARN };
+        fill_rect(fb, Rect { x: mk - 1, y: b.y - 3, w: 3, h: b.h + 6 }, col, 255);
+        // flecha hacia la velocidad circular cuando va demasiado rápido/lento
+        if !*stable && *vc > 1.0 {
+            let label = if ratio < 0.9 { ">> ACELERAR" } else { "<< FRENAR" };
+            draw_text_shadow(fb, r.x + 8, r.y + r.h + 2, label, COL_WARN, 1);
+        }
+        if *stable {
+            let m = "ORBITA ESTABLE";
+            let pr = Rect { x: (w - text_width(m, 2)) / 2 - 10, y: h - 28 - 12 - 28 - 30, w: text_width(m, 2) + 20, h: 22 };
+            panel(fb, pr);
+            draw_text_shadow(fb, pr.x + 10, pr.y + 4, m, COL_GOOD, 2);
+        }
+    }
+
+    // --- aterrizaje asistido y barra de altitud
+    if s.landing_assist {
+        let m = "ATERRIZAJE ASISTIDO";
+        let r = Rect { x: (w - text_width(m, 2)) / 2 - 10, y: 62, w: text_width(m, 2) + 20, h: 22 };
+        panel(fb, r);
+        draw_text_shadow(fb, r.x + 10, r.y + 4, m, COL_GOOD, 2);
+    }
+    if s.show_alt_bar || s.landing_assist {
+        let r = Rect { x: w - 40, y: 120, w: 16, h: 220 };
+        let frac = (s.altitude / 250.0).clamp(0.0, 1.0) as f32;
+        fill_rect(fb, r, [0, 0, 0], 140);
+        let fh = (r.h as f32 * frac) as i32;
+        let col = if s.altitude < 30.0 { COL_GOOD } else { COL_ACCENT };
+        fill_rect(fb, Rect { x: r.x + 1, y: r.y + r.h - fh, w: r.w - 2, h: fh }, col, 220);
+        stroke_rect(fb, r, COL_BORDER, 220);
+        draw_text_shadow(fb, r.x - 12, r.y - 14, "ALT", COL_DIM, 1);
+        let t = format_distance(s.altitude);
+        draw_text_shadow(fb, r.x + r.w - text_width(&t, 1), r.y + r.h + 6, &t, COL_TEXT, 1);
+    }
+
+    // --- destrucción
+    if let Some((msg, left)) = s.dead {
+        let tw = text_width(msg, 3);
+        let r = Rect { x: (w - tw) / 2 - 16, y: h / 2 - 34, w: tw + 32, h: 68 };
+        panel(fb, r);
+        draw_text_shadow(fb, r.x + 16, r.y + 10, msg, COL_DANGER, 3);
+        let sub = format!("REAPARECIENDO EN {:.0} S  [K]", left.ceil().max(0.0));
+        draw_text_shadow(fb, (w - text_width(&sub, 2)) / 2, r.y + 42, &sub, COL_TEXT, 2);
+    }
 }
 
 #[cfg(test)]
@@ -505,6 +631,28 @@ mod tests {
         assert!(HELP_ROWS.iter().any(|(k, _)| k.contains("M /")));
         assert!(HELP_ROWS.iter().all(|(k, d)| k.len() <= 13 && d.len() <= 28), "texto demasiado largo para el panel");
         assert!(56 + HELP_ROWS.len() as i32 * 18 + 24 < 540);
+    }
+
+    #[test]
+    fn flight_hud_draws_every_block_without_panicking() {
+        let mut fb = Framebuffer::new(960, 540);
+        let st = FlightHud {
+            heat: 0.8,
+            hull: 0.7,
+            orbit: Some(("VERDALIA".into(), 250.0, 264.0, true)),
+            nav_panel: true,
+            landing_assist: true,
+            altitude: 120.0,
+            show_alt_bar: true,
+            dead: Some(("NAVE DESTRUIDA: CALOR", 2.5)),
+            time: 0.0,
+        };
+        draw_flight_hud(&mut fb, &st);
+        assert!(lit_bbox(&fb, 0).is_some());
+        let mut tiny = Framebuffer::new(20, 20);
+        draw_flight_hud(&mut tiny, &st);
+        assert_eq!(format_speed(50_000.0), "50.00 KM/S");
+        assert_eq!(format_speed(999.0), "999.0 M/S");
     }
 
     #[test]

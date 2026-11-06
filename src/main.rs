@@ -3,9 +3,13 @@
 mod app;
 mod atmos_shot;
 mod atmosphere;
+mod demos;
+mod fx;
 mod geometry;
 mod hud;
 mod math;
+mod orbits;
+mod particles;
 mod platform;
 mod png;
 mod raster;
@@ -39,6 +43,9 @@ fn main() {
              galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
              galaxy [--seed N]               semilla de la distribución de objetos en superficie (por defecto 1)\n\
              galaxy --surface-shot out.png --body verdalia --alt 40 [--seed N] [--time T]   suelo con árboles/espiras/cristales/edificios\n\
+             galaxy --orbits-shot out.png     lineas de orbita vistas desde arriba\n\
+             galaxy --death-shot DIR          acercarse al sol hasta morir (cuadros PNG)\n\
+             galaxy --landing-shot DIR        aterrizaje asistido con polvo (cuadros PNG)\n\
              galaxy --terrain-shot out.png [--alt M] [--kind verdalia]   terreno con LOD (demo)"
         );
         return;
@@ -48,6 +55,9 @@ fn main() {
     }
     if let Some(out) = arg_value(&args, "--surface-shot") {
         surface_shot::run(Path::new(&out), &args);
+        return;
+    }
+    if demos::dispatch(&args) {
         return;
     }
     if let Some(out) = arg_value(&args, "--shot") {

@@ -10,7 +10,7 @@
 use super::modes::*;
 use super::{Input, Ship};
 use crate::math::{DVec3, Quat, Vec3};
-use crate::world::{altitude, cross, rot_y, smoothstep01, surface_height_at, terrain_altitude, Body};
+use crate::world::{altitude, cross, rot_y, smoothstep01, surface_height_at, terrain_altitude, Body, BodyKind};
 
 pub fn q_rot(q: Quat, v: DVec3) -> DVec3 {
     q.rotate(v.to_f32()).to_f64()
@@ -22,9 +22,9 @@ fn expk(dt: f64, tau: f64) -> f64 {
     1.0 - (-dt / tau).exp()
 }
 
-/// Cuerpos que atraen (el sol no: gm = 0) y que sirven de marco.
+/// Cuerpos que atraen y sirven de marco local (el sol atrae pero no es marco: se orbita en crucero).
 fn is_planet(b: &Body) -> bool {
-    b.gm > 0.0
+    b.gm > 0.0 && b.kind != BodyKind::Sun
 }
 
 /// Índice del planeta con menor altitud/radio y esa razón. None si no hay planetas.
@@ -66,7 +66,12 @@ pub fn effective_gravity(s: &Ship, bodies: &[Body], t: f64) -> DVec3 {
     if !s.gravity_enabled || s.mode == NavMode::Landed {
         return DVec3::ZERO;
     }
-    let g = raw_gravity(bodies, s.position, t);
+    // Dentro de una esfera local (ORBITA/DESCENSO) solo cuenta el planeta del marco ("conic patching"): el marco ya
+    // sigue al planeta, y la atracción del sol sería una fuerza espuria que deforma las órbitas.
+    let g = match (s.mode, s.frame) {
+        (NavMode::Orbit | NavMode::Descent, Some(i)) => bodies[i].gravity_at(bodies[i].position(t), s.position),
+        _ => raw_gravity(bodies, s.position, t),
+    };
     let relief = if s.flight_assist {
         match s.mode {
             NavMode::Orbit => s.gravity_relief,
@@ -155,11 +160,21 @@ fn level_toward(s: &mut Ship, n: DVec3, k: f64) {
     }
 }
 
+/// Multiplicador de aceleración por boost. El jugador en CRUCERO sube de BOOST_ACCEL a BOOST_ACCEL_MAX con el
+/// tiempo de boost sostenido (suave: exponencial); en el resto (y el autopiloto) es BOOST_ACCEL fijo.
+pub fn boost_factor(s: &Ship) -> f64 {
+    if s.mode == NavMode::Cruise && !s.raw_controls {
+        BOOST_ACCEL + (BOOST_ACCEL_MAX - BOOST_ACCEL) * (1.0 - (-s.boost_charge / BOOST_RAMP_TAU).exp())
+    } else {
+        BOOST_ACCEL
+    }
+}
+
 fn target_accel(s: &Ship, input: &Input, rel: Option<DVec3>) -> DVec3 {
     if input.brake {
         return DVec3::ZERO;
     }
-    let k = if input.boost { BOOST_ACCEL } else { 1.0 };
+    let k = if input.boost { boost_factor(s) } else { 1.0 };
     let lx = input.thrust.x as f64 * ACCEL_LAT * k;
     let ly = input.thrust.y as f64 * ACCEL_VERT * k;
     let lz = input.thrust.z as f64 * ACCEL_FWD * k;
@@ -182,12 +197,12 @@ fn target_accel(s: &Ship, input: &Input, rel: Option<DVec3>) -> DVec3 {
     }
 }
 
-fn speed_cap(mode: NavMode, boost: bool, alt: f64) -> f64 {
-    let base = if boost { BOOST_SPEED } else { CRUISE_SPEED };
+/// Tope de velocidad (relativa al marco). CRUCERO: solo el límite numérico; ORBITA/DESCENSO: ∝ altitud.
+fn speed_cap(mode: NavMode, alt: f64) -> f64 {
     match mode {
-        NavMode::Cruise => base,
-        NavMode::Orbit => base.min((ORBIT_SPEED_K * alt).max(20.0)),
-        NavMode::Descent => base.min((DESCENT_SPEED_K * alt).max(MIN_SPEED_NEAR_GROUND)),
+        NavMode::Cruise => SPEED_LIMIT,
+        NavMode::Orbit => SPEED_LIMIT.min((ORBIT_SPEED_K * alt).max(20.0)),
+        NavMode::Descent => SPEED_LIMIT.min((DESCENT_SPEED_K * alt).max(MIN_SPEED_NEAR_GROUND)),
         NavMode::Landed => 0.0,
     }
 }
@@ -211,9 +226,26 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
     let pb0 = fb.map(|b| b.position(t)).unwrap_or(DVec3::ZERO);
     let rel0 = s.position - pb0;
     let alt = fb.map(|b| rel0.length() - b.radius).unwrap_or(f64::MAX);
-    let corot = fb.map(|b| corotation_blend(alt / b.radius)).unwrap_or(0.0);
+    // Co-rotación con el suelo: con asistencia (o autopiloto) desde 1R de altitud; con vuelo newtoniano puro solo muy
+    // cerca del suelo, para que una órbita libre a 1.5R no arrastre fuerzas ficticias del marco giratorio.
+    let corot = fb
+        .map(|b| {
+            if s.flight_assist || s.raw_controls {
+                corotation_blend(alt / b.radius)
+            } else {
+                smoothstep01((0.2 - alt / b.radius) / 0.2)
+            }
+        })
+        .unwrap_or(0.0);
     let fv0 = fb.map(|b| frame_velocity(b, t, rel0, corot)).unwrap_or(DVec3::ZERO);
     let mut u = s.velocity - fv0;
+
+    // --- boost sostenido: la carga sube mientras se mantiene empuje + boost y decae al soltar ---
+    if input.boost && !input.brake && input.thrust.length() > 0.05 {
+        s.boost_charge += dt;
+    } else {
+        s.boost_charge *= (-dt / BOOST_DECAY_TAU).exp();
+    }
 
     // --- empuje progresivo: aceleración objetivo -> suavizado exponencial ---
     let a_target = target_accel(s, input, fb.map(|_| rel0));
@@ -268,22 +300,22 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
         u = u - (u - u_ref) * expk(dt, 1.0 / rate);
     }
 
-    // --- límite de velocidad (crucero fijo; en local proporcional a la altitud) ---
-    let cap = speed_cap(s.mode, input.boost, alt);
+    // --- límite de velocidad: crucero sin tope de jugabilidad; en local proporcional a la altitud ---
+    let cap = speed_cap(s.mode, alt);
     let sp = u.length();
     if sp > cap {
-        // tope firme pero sin tirones: el exceso se recorta con desaceleración acotada (CAP_DECEL)
-        if s.mode == NavMode::Cruise {
-            let new_sp = (sp - CAP_DECEL * dt).max(cap);
-            u = u * (new_sp / sp);
+        let excess = sp - cap;
+        let dv = if s.mode == NavMode::Cruise {
+            (CAP_DECEL * dt).min(excess)
         } else {
-            // en local (Orbit/Descent) se mantiene el tope suave original: el aterrizaje depende de él
-            let f = cap / sp;
-            u = u * (1.0 - (1.0 - f) * expk(dt, 1.5));
-        }
+            // al entrar a alta velocidad en ORBITA/DESCENSO frena gradualmente: exceso/1.5 s con tope LOCAL_DECEL_MAX
+            (excess * expk(dt, 1.5)).min(LOCAL_DECEL_MAX * dt)
+        };
+        u = u * ((sp - dv) / sp);
     }
 
     // --- integración (semi-implícita) en el marco ---
+    let p_old = s.position;
     if let Some(b) = fb {
         let mut rel = rel0 + u * dt;
         rel = rot_y(rel, corot * b.spin_rate() * dt);
@@ -303,6 +335,7 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
         }
     }
 
+    sweep_collisions(s, p_old, t, t1, bodies);
     let landed = collide(s, dt, t1, bodies);
     if landed {
         s.mode = NavMode::Landed;
@@ -317,6 +350,48 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
         None => f64::MAX,
     };
     update_gear(s, dt);
+}
+
+/// Colisión CONTINUA: si el paso desplazó la nave más de `SWEEP_MIN` m, recorre el segmento p_old -> p_new (en el
+/// marco de cada cuerpo, que también se mueve) con muestras de ≤ ~6 m. Si alguna cae bajo la superficie, coloca la
+/// nave en la primera muestra interior; `collide` la lleva entonces al contacto y calcula el impacto con la velocidad
+/// real. Así a decenas de km/s no se atraviesa un planeta ni el sol (aunque el paso mida cientos de metros).
+fn sweep_collisions(s: &mut Ship, p_old: DVec3, t: f64, t1: f64, bodies: &[Body]) {
+    const SWEEP_MIN: f64 = 30.0;
+    let p_new = s.position;
+    if (p_new - p_old).length() < SWEEP_MIN {
+        return;
+    }
+    let mut best: Option<(f64, DVec3)> = None;
+    for b in bodies {
+        let (c0, c1) = (b.position(t), b.position(t1));
+        let (r0, r1) = (p_old - c0, p_new - c1);
+        let d = r1 - r0;
+        let dd = d.dot(d).max(1e-9);
+        let tc = (-r0.dot(d) / dd).clamp(0.0, 1.0);
+        let max_r = b.radius * (1.0 + crate::relief::max_amplitude(b.kind) as f64) + SHIP_RADIUS;
+        if (r0 + d * tc).length() > max_r {
+            continue;
+        }
+        let n = ((dd.sqrt() / 6.0).ceil() as usize).clamp(2, 4000);
+        for k in 1..=n {
+            let tau = k as f64 / n as f64;
+            let r = r0 + d * tau;
+            let dist = r.length();
+            if dist < 1e-6 {
+                continue;
+            }
+            if dist < surface_height_at(b, t1, r * (1.0 / dist)) + SHIP_RADIUS {
+                if best.map_or(true, |(bt, _)| tau < bt) {
+                    best = Some((tau, c1 + r));
+                }
+                break;
+            }
+        }
+    }
+    if let Some((_, p)) = best {
+        s.position = p;
+    }
 }
 
 /// Colisión esfera-nave vs superficie de cada cuerpo. Devuelve true si se posó suavemente.

@@ -8,7 +8,7 @@ use super::modes::*;
 use super::physics::{corotation_blend, effective_gravity, q_rot, q_rot_inv};
 use super::{Input, NavMode, Ship};
 use crate::math::{DVec3, Quat, Vec3};
-use crate::world::{altitude, cross, smoothstep01, surface_height_at, Body, TAU};
+use crate::world::{altitude, cross, smoothstep01, surface_height_at, Body, BodyKind, TAU};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -40,7 +40,7 @@ impl Phase {
 }
 
 // ---- Constantes del autopiloto ----
-const V_CRUISE: f64 = 1600.0; // velocidad de crucero relativa al destino (con boost el tope es 2000 m/s)
+const V_CRUISE: f64 = 1600.0; // velocidad de crucero del perfil del Tour, relativa al destino (el perfil es propio; la nave ya no tiene tope)
 const A_DEC: f64 = 250.0; // deceleración de diseño del perfil (m/s²) < aceleración disponible
 const A_LIM: f64 = 500.0; // tope de aceleración pedida
 const APPROACH_R: f64 = 3.5; // radios (centro) del punto de espera
@@ -59,10 +59,10 @@ const KD: f64 = 1.6;
 
 /// Radio (desde el centro) de la órbita de espera y de la órbita final del cuerpo, en radios.
 fn orbit_factor(b: &Body) -> f64 {
-    if b.gm <= 0.0 { SUN_ORBIT_R } else { ORBIT_R }
+    if b.kind == BodyKind::Sun { SUN_ORBIT_R } else { ORBIT_R }
 }
 fn approach_factor(b: &Body) -> f64 {
-    if b.gm <= 0.0 { SUN_APPROACH_R } else { APPROACH_R }
+    if b.kind == BodyKind::Sun { SUN_APPROACH_R } else { APPROACH_R }
 }
 
 fn clamp_mag(v: DVec3, m: f64) -> DVec3 {
@@ -172,6 +172,8 @@ pub struct Autopilot {
     /// true = viaje a un destino (`go_to`): ALINEAR -> TRANSITO -> APROXIMAR -> ORBITAR 1 vuelta y se detiene.
     /// En ese caso `tour` es false; para el HUD el botón de aterrizaje solo debe marcarse con `is_landing()`.
     pub trip: bool,
+    /// true = el aterrizaje lo activó el modo asistido de DESCENSO (no el botón): cae recto al suelo bajo la nave.
+    pub assisted: bool,
     pub phase: Phase,
     /// Índice del cuerpo destino.
     pub target: usize,
@@ -216,6 +218,7 @@ impl Autopilot {
             active: false,
             tour: true,
             trip: false,
+            assisted: false,
             phase: Phase::Idle,
             target: 0,
             gear: 0.0,
@@ -305,6 +308,7 @@ impl Autopilot {
     /// Detiene el autopiloto; la nave conserva su estado (sin saltos).
     pub fn stop(&mut self) {
         self.active = false;
+        self.assisted = false;
         self.phase = Phase::Idle;
     }
 
@@ -329,6 +333,17 @@ impl Autopilot {
         self.trip = false;
         self.target = i;
         self.set_phase(Phase::Descend, t, ship, bodies);
+        true
+    }
+
+    /// Aterrizaje ASISTIDO (lo activa `Sim` al entrar a un planeta a baja velocidad): como `start_landing_here` pero
+    /// desciende recto sobre el punto que hay bajo la nave (sin desplazamiento lateral).
+    pub fn start_assisted_landing(&mut self, ship: &Ship, bodies: &[Body], t: f64) -> bool {
+        if !self.start_landing_here(ship, bodies, t) {
+            return false;
+        }
+        self.assisted = true;
+        self.site = self.d0;
         true
     }
 
@@ -678,7 +693,7 @@ impl Autopilot {
             if i == self.target {
                 continue;
             }
-            let (limit, way) = if b.gm <= 0.0 { (1.7, 2.2) } else { (2.4, 3.0) };
+            let (limit, way) = if b.kind == BodyKind::Sun { (1.7, 2.2) } else { (2.4, 3.0) };
             let tc = (-(p.dot(d) - b.position(t).dot(d)) / dd).clamp(0.0, 1.0);
             let c = b.position(t + eta * tc);
             let closest = p + d * tc;
@@ -824,7 +839,7 @@ mod tests {
         let alt_r = ((sim.ship.position - b.position(sim.t)).length() - b.radius) / b.radius;
         assert!(alt_r > 0.5 && alt_r < 2.0, "altitud final {alt_r} R de {}", b.name);
         assert!(!sim.ship.raw_controls);
-        if b.gm > 0.0 {
+        if b.kind != BodyKind::Sun {
             assert_eq!(sim.ship.mode, NavMode::Orbit);
         }
         assert!(max_eta > 0.0);
