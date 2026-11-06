@@ -119,18 +119,46 @@ fn release_thrust_with_assist_brakes_without_oscillating() {
 }
 
 #[test]
-fn boost_raises_speed_cap() {
+fn speed_keeps_rising_without_cap() {
+    // ya no hay tope de 1000/2000 m/s: mantener el empuje sigue subiendo la velocidad, sin NaN, hasta 50 km/s
     let mut a = open_space();
     let normal = run(&mut a, &[(10.0, KeyState { w: true, ..k() })], FWD);
+    assert!(normal.last().unwrap().speed > 1.5 * CRUISE_REF, "sin boost debe pasar de 1500 m/s: {}", normal.last().unwrap().speed);
     let mut b = open_space();
-    let boosted = run(&mut b, &[(10.0, KeyState { w: true, shift: true, ..k() })], FWD);
-    let (vn, vb) = (normal.last().unwrap().speed, boosted.last().unwrap().speed);
-    println!("tope: normal={vn:.0} boost={vb:.0}");
-    assert!(vn > 0.95 * CRUISE_SPEED && vn < 1.03 * CRUISE_SPEED, "tope normal {vn}");
-    assert!(vb > 1.5 * CRUISE_SPEED && vb < 1.03 * BOOST_SPEED, "tope con boost {vb}");
+    let boosted = run(&mut b, &[(60.0, KeyState { w: true, shift: true, ..k() })], FWD);
+    assert!(boosted.iter().all(|s| s.speed.is_finite() && s.along.is_finite()));
+    assert!(boosted.windows(2).all(|w| w[1].speed >= w[0].speed - 1e-9), "no monótona");
+    let at = |t: f64| boosted[(t * FPS) as usize - 1].speed;
+    println!("boost: 5s={:.0} 10s={:.0} 20s={:.0} 40s={:.0} 60s={:.0}", at(5.0), at(10.0), at(20.0), at(40.0), at(60.0));
+    assert!(at(10.0) > 2000.0, "el boost pasa los 2 km/s: {}", at(10.0));
+    assert!(at(30.0) > at(20.0) * 1.2 && at(60.0) > at(30.0) * 1.2, "debe seguir subiendo");
+    assert!(boosted.last().unwrap().speed > 50_000.0, "a los 60 s debe pasar de 50 km/s: {}", boosted.last().unwrap().speed);
+    // el boost sostenido acelera cada vez más fuerte (aceleración creciente) y sin saltos de velocidad por cuadro
+    let acc = |t0: f64, t1: f64| (at(t1) - at(t0)) / (t1 - t0);
+    assert!(acc(10.0, 15.0) > acc(0.5, 5.5) * 1.5, "la aceleración no crece con el boost sostenido");
+    let mut prev = 0.0;
+    for s in &boosted {
+        assert!((s.speed - prev).abs() < 8.0 * ACCEL_FWD * BOOST_ACCEL_MAX / 8.0 / FPS * 1.05 + 1.0, "salto {} en t={}", s.speed - prev, s.t);
+        prev = s.speed;
+    }
     // el boost también acelera más fuerte al inicio
     assert!(boosted[60].speed > normal[60].speed * 1.2);
 }
+
+#[test]
+fn releasing_boost_at_high_speed_brakes_smoothly() {
+    let mut sim = open_space();
+    let tr = run(&mut sim, &[(30.0, KeyState { w: true, shift: true, ..k() }), (8.0, k())], FWD);
+    let rel = 30 * 60;
+    let v = tr[rel - 1].speed;
+    assert!(v > 10_000.0);
+    assert!(tr.iter().all(|s| s.speed.is_finite()));
+    assert!(tr.last().unwrap().speed < 0.05 * v, "la asistencia debe frenar");
+    let peak = tr.iter().enumerate().skip(rel).max_by(|a, b| a.1.speed.partial_cmp(&b.1.speed).unwrap()).unwrap().0;
+    assert!(tr[peak..].windows(2).all(|w| w[1].speed <= w[0].speed + 1e-9));
+}
+
+const CRUISE_REF: f64 = 1000.0;
 
 #[test]
 fn brake_stops_the_ship() {
@@ -158,7 +186,7 @@ fn scripted_ten_second_flight() {
     assert_eq!(tr.len(), 600);
     assert!(tr.iter().all(|s| s.speed.is_finite() && s.w.length().is_finite()));
     let max = tr.iter().map(|s| s.speed).fold(0.0, f64::max);
-    assert!(max > 800.0 && max <= BOOST_SPEED * 1.03);
+    assert!(max > 800.0 && max < SPEED_LIMIT);
     assert!(tr.last().unwrap().speed < 10.0, "no termina frenada: {}", tr.last().unwrap().speed);
     assert!(tr.last().unwrap().w.length() < 1e-3);
     assert!(!sim.autopilot.active);
