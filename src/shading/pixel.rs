@@ -1,6 +1,7 @@
 //! Mutante: cara pixelada 16x16 que muta de vaca a cerdo; el azar lo guía HighLife (precalculado).
 use super::life::LifeTimeline;
 use super::noise::*;
+use super::normalmap::{self, Surface, Tiling};
 use crate::raster::{FragIn, FragmentShader, Uniforms};
 
 pub struct PixelShader {
@@ -58,6 +59,7 @@ impl FragmentShader for PixelShader {
         if gx.rem_euclid(1.0).min(gy.rem_euclid(1.0)) < 0.035 {
             c = lit(c, 0.85);
         }
-        finish(lit(c, 0.37 + 0.63 * f.normal.dot(u.light_dir).max(0.0)))
+        let n = normalmap::perturb_world(normalmap::map(Surface::Steps), f, u, Tiling { tile_m: 4.0, strength: 1.0 });
+        finish(lit(c, 0.37 + 0.63 * n.dot(u.light_dir).max(0.0)))
     }
 }

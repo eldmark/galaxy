@@ -412,7 +412,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 18] = [
+pub const HELP_ROWS: [(&str, &str); 19] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
@@ -429,6 +429,7 @@ pub const HELP_ROWS: [(&str, &str); 18] = [
     ("1 - 6", "Viajar al cuerpo (1=sol)"),
     ("F1", "Esta ayuda"),
     ("F3 / F4 / F5", "Stats / culling / LOD"),
+    ("N", "Mapa de normales on/off"),
     ("P", "Captura de pantalla"),
     ("ESC", "Salir"),
 ];

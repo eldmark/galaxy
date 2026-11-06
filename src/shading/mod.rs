@@ -6,11 +6,13 @@
 //! (ver `life.rs`): función pura del tiempo de simulación, sin `update`.
 use crate::raster::{FragIn, FragmentShader, Uniforms};
 use crate::world::BodyKind;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod giant;
 mod ice;
 mod life;
 mod noise;
+pub mod normalmap;
 mod pixel;
 mod props;
 mod rocky;
@@ -26,6 +28,33 @@ pub use rocky::RockyShader;
 pub use sky::sky_color;
 pub use sun::SunShader;
 pub use volcanic::VolcanicShader;
+
+static NORMALMAP_ON: AtomicBool = AtomicBool::new(true);
+
+#[cfg(test)]
+thread_local! {
+    static TEST_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Activa o desactiva el mapa de normales en todos los shaders de superficie (tecla N).
+pub fn set_normal_map(on: bool) {
+    NORMALMAP_ON.store(on, Ordering::Relaxed);
+}
+pub fn normal_map_enabled() -> bool {
+    #[cfg(test)]
+    if let Some(v) = TEST_OVERRIDE.with(|c| c.get()) {
+        return v;
+    }
+    NORMALMAP_ON.load(Ordering::Relaxed)
+}
+/// Solo pruebas: fuerza el estado en ESTE hilo mientras corre `f` (no afecta a otras pruebas en paralelo).
+#[cfg(test)]
+pub fn with_normal_map<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    TEST_OVERRIDE.with(|c| c.set(Some(on)));
+    let r = f();
+    TEST_OVERRIDE.with(|c| c.set(None));
+    r
+}
 
 /// Lambert simple, solo para que el esqueleto funcione antes de portar los shaders reales.
 pub struct Fallback;

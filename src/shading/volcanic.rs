@@ -1,6 +1,7 @@
 //! Fornax: placas de basalto (celdas 3D) con magma animado, bump mapping y parallax.
 //! La iluminación se calcula en espacio local (luz/vista/normal transformadas con el modelo).
 use super::noise::*;
+use super::normalmap::{self, Surface, Tiling};
 use crate::math::Vec3;
 use crate::raster::{FragIn, FragmentShader, Uniforms};
 
@@ -111,6 +112,8 @@ impl FragmentShader for VolcanicShader {
         } else {
             n
         };
+        // Complemento del bump procedural: normales de columnas de basalto (más fino y estable de cerca).
+        let ln = normalmap::perturb_local(normalmap::map(Surface::Basalt), f, u, ln, Tiling { tile_m: 6.0, strength: 1.0 });
         let diffuse = 0.20 + 0.8 * ln.dot(light).max(0.0);
         let half = (light + view).normalized();
         let spec = ln.dot(half).max(0.0).powi(24) * (1.0 - s.crack) * (36.0 / 255.0);

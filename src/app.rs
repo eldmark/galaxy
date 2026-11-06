@@ -244,6 +244,7 @@ impl Scene {
         let ship_uniforms = Uniforms { light_dir: sun_dir, time, detail: 1.0, model: ship_model };
         calls.extend(self.ship.draw_calls(ship_model, sim.ship.gear, self.ship_shader.as_ref(), ship_uniforms));
         render_scene(fb, view, proj, &calls, opts, stats);
+        crate::atmosphere::apply(fb, view, FOV_Y, eye, &sim.bodies, sim.t);
     }
 }
 
@@ -330,6 +331,9 @@ pub fn run(start_tour: bool) {
         }
         if input.toggle_lod {
             lod_on = !lod_on;
+        }
+        if input.toggle_normalmap {
+            crate::shading::set_normal_map(!crate::shading::normal_map_enabled());
         }
         if input.toggle_gravity {
             sim.ship.gravity_enabled = !sim.ship.gravity_enabled;

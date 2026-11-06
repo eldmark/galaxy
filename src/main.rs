@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 mod app;
+mod atmos_shot;
+mod atmosphere;
 mod geometry;
 mod hud;
 mod math;
@@ -32,12 +34,21 @@ fn main() {
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
+             galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
              galaxy --terrain-shot out.png [--alt M] [--kind verdalia]   terreno con LOD (demo)"
         );
         return;
     }
     if let Some(out) = arg_value(&args, "--shot") {
         shot::system(Path::new(&out), time, has("--stats")).expect("no se pudo guardar el PNG");
+        return;
+    }
+    if let Some(out) = arg_value(&args, "--atmos-shot") {
+        let body = arg_value(&args, "--body").unwrap_or_default();
+        let alt = arg_value(&args, "--alt").and_then(|a| a.parse().ok()).unwrap_or(40.0);
+        let sun = arg_value(&args, "--sun").and_then(|a| a.parse().ok()).unwrap_or(25.0);
+        let az = arg_value(&args, "--az").and_then(|a| a.parse().ok()).unwrap_or(0.0);
+        atmos_shot::shot(Path::new(&out), &body, alt, sun, az, !has("--no-normalmap"), has("--space")).expect("no se pudo guardar el PNG");
         return;
     }
     if let Some(out) = arg_value(&args, "--terrain-shot") {

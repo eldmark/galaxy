@@ -1,6 +1,7 @@
 //! Verdalia: continentes + océano, casquetes polares, ciudades nocturnas, nubes animadas con sombra.
 use super::life::LifeTimeline;
 use super::noise::*;
+use super::normalmap::{self, Surface, Tiling};
 use crate::raster::{FragIn, FragmentShader, Uniforms};
 use std::f32::consts::PI;
 
@@ -42,12 +43,24 @@ impl FragmentShader for RockyShader {
         c = blend(c, ground, land);
         c = blend(c, rgb(210., 227., 221.), polar * (0.65 + det * 0.35));
         let nl = f.normal.dot(u.light_dir);
-        let d = nl.max(0.0);
+        // Mapa de normales de grava solo en tierra firme (menos en los casquetes de hielo liso).
+        let ground_n = if land > 0.05 {
+            let pn = normalmap::perturb_world(normalmap::map(Surface::Gravel), f, u, Tiling { tile_m: 6.0, strength: 1.0 });
+            (f.normal + (pn - f.normal) * (land * (1.0 - polar * 0.6))).normalized()
+        } else {
+            f.normal
+        };
+        let d = ground_n.dot(u.light_dir).max(0.0);
         // Brillo especular del océano: reflejo de la luz hacia la cámara.
         let r = f.normal * (2.0 * nl) - u.light_dir;
         let spec = if nl > 0.0 { r.dot(f.view_dir).max(0.0).powi(20) * (1.0 - land) * (105.0 / 255.0) } else { 0.0 };
         c = lit(c, 0.23 + 0.77 * d);
         c = add_all(c, spec);
+        if land > 0.05 && nl > 0.0 {
+            // brillo mate de la roca mojada/pulida, solo visible con relieve fino
+            let hv = (u.light_dir + f.view_dir).normalized();
+            c = add_all(c, ground_n.dot(hv).max(0.0).powi(14) * 0.05 * land);
+        }
         let cloud = smooth(0.54, 0.63, clouds(p.x, p.y, p.z, u.time, o));
         let sh = smooth(0.54, 0.63, clouds(p.x - lo.x * 0.045, p.y - lo.y * 0.045, p.z - lo.z * 0.045, u.time, o));
         c = lit(c, 1.0 - sh * 0.35 * d);

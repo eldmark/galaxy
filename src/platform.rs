@@ -19,6 +19,7 @@ pub struct UiInput {
     pub toggle_stats: bool,  // F3
     pub toggle_culling: bool, // F4
     pub toggle_lod: bool,    // F5
+    pub toggle_normalmap: bool, // N
     pub screenshot: bool,    // P
     pub quit: bool,
     /// AÑADIDO. G: gravedad on/off.
@@ -200,6 +201,7 @@ impl Platform {
             toggle_stats: rl.is_key_pressed(KEY_F3),
             toggle_culling: rl.is_key_pressed(KEY_F4),
             toggle_lod: rl.is_key_pressed(KEY_F5),
+            toggle_normalmap: rl.is_key_pressed(KEY_N),
             screenshot: rl.is_key_pressed(KEY_P),
             quit: rl.is_key_pressed(KEY_ESCAPE),
             toggle_gravity: rl.is_key_pressed(KEY_G),
