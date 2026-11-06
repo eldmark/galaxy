@@ -48,7 +48,7 @@ pub const N_SCATTER: u8 = 6;
 /// Distancia máxima (múltiplo de `lod_dist[1]`) a la que aún se cuentan las instancias descartadas por distancia.
 const COUNT_RANGE: f32 = 2.0;
 /// Mallas horneadas nuevas por cuadro (el resto se hornea en los cuadros siguientes; mientras tanto no hay objetos).
-const BAKE_BUDGET: usize = 12;
+const BAKE_BUDGET: usize = 4;
 const MESH_CACHE: usize = 192;
 const CELL_CACHE: usize = 4096;
 
