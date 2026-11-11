@@ -7,6 +7,8 @@ use crate::world::smoothstep01;
 pub enum DeathCause {
     Heat,
     Impact,
+    BlackHole,
+    Police,
 }
 
 impl DeathCause {
@@ -15,6 +17,8 @@ impl DeathCause {
         match self {
             DeathCause::Heat => "NAVE DESTRUIDA: CALOR",
             DeathCause::Impact => "NAVE DESTRUIDA: IMPACTO",
+            DeathCause::BlackHole => "NAVE DESTRUIDA: AGUJERO NEGRO",
+            DeathCause::Police => "NAVE DESTRUIDA: POLICIA",
         }
     }
 }

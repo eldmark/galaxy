@@ -20,6 +20,10 @@ pub struct UiInput {
     pub toggle_culling: bool, // F4
     pub toggle_lod: bool,    // F5
     pub toggle_resolution: bool, // F6
+    pub start_game: bool, // Enter o espacio en el menú
+    pub toggle_board: bool, // B: aterrizar y salir / abordar
+    pub collect: bool, // E: recoger tesoro a pie
+    pub fire: bool, // Espacio mantenido: disparar
     pub toggle_normalmap: bool, // N
     pub screenshot: bool,    // P
     pub quit: bool,
@@ -207,6 +211,10 @@ impl Platform {
             toggle_culling: rl.is_key_pressed(KEY_F4),
             toggle_lod: rl.is_key_pressed(KEY_F5),
             toggle_resolution: rl.is_key_pressed(KEY_F6),
+            start_game: rl.is_key_pressed(KEY_ENTER) || rl.is_key_pressed(KEY_SPACE),
+            toggle_board: rl.is_key_pressed(KEY_B),
+            collect: rl.is_key_pressed(KEY_E),
+            fire: rl.is_key_down(KEY_SPACE),
             toggle_normalmap: rl.is_key_pressed(KEY_N),
             screenshot: rl.is_key_pressed(KEY_P),
             quit: rl.is_key_pressed(KEY_ESCAPE),

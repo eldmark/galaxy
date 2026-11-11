@@ -1,6 +1,6 @@
 # Galaxy: sistema solar explorable con renderizador por software
 
-Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Es un sistema solar pequeño en Rust: un sol, cinco planetas con órbita y rotación, una nave propia que se controla con inercia, gravedad y colisión, y un Tour automático que viaja de planeta en planeta, orbita, desciende y aterriza. Todo el dibujo se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib solo abre la ventana, lee el teclado y el ratón y muestra el framebuffer como una textura 2D.
+Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Es un juego de piratas espaciales en un sistema solar pequeño: se buscan tesoros en los planetas, se combate contra patrullas de policía y se evita un agujero negro en el borde. La nave conserva inercia, gravedad y colisión, y el Tour automático viaja de planeta en planeta, orbita, desciende y aterriza. Todo el dibujo se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib solo abre la ventana, lee el teclado y el ratón y muestra el framebuffer como una textura 2D.
 
 ![Sistema solar](screenshots/sistema.png)
 
@@ -10,7 +10,7 @@ Necesitas Rust (edición 2024, cargo reciente), CMake y un compilador de C, porq
 
 ```bash
 cargo test                       # pruebas unitarias y de integración
-cargo run --release              # ventana interactiva 960x540
+cargo run --release              # portada y juego interactivo 960x540
 cargo run --release -- --tour    # igual, pero con el Tour automático ya iniciado
 ```
 
@@ -20,10 +20,11 @@ Opciones de línea de comandos (las que imprime `--help`):
 
 | Opción | Qué hace |
 |---|---|
-| `--tour` | Abre la ventana con el piloto automático iniciado |
+| `--tour` | Omite la portada y abre la ventana con el piloto automático iniciado |
 | `--bench [--frames N]` | Recorre el Tour sin ventana con y sin culling/LOD y compara tiempos y triángulos (N=3000 por defecto) |
 | `--record DIR [--frames N] [--every K]` | Guarda en `DIR` un PNG cada K cuadros del Tour (N=1800 y K=60 por defecto), sin ventana |
 | `--shot out.png [--time T] [--stats]` | Vista del sistema en un PNG (`--stats` imprime los contadores) |
+| `--menu-shot out.png` | Captura la portada en PNG sin abrir la ventana |
 | `--shot-ship out.png [--gear G]` | Vista de la nave en un PNG; G va de 0 (tren plegado) a 1 (desplegado) |
 | `--surface-shot out.png --body verdalia --alt 40 [--seed N]` | Vista de los objetos sobre el suelo |
 | `--atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]` | Vista de atmósfera y comparación del mapa de normales |
@@ -49,14 +50,18 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 
 | Tecla | Acción |
 |---|---|
+| `Enter` / `Espacio` | Iniciar la partida desde la portada |
 | `W` / `S` | Adelante / atrás |
 | `A` / `D` | Lateral izquierda / derecha |
-| `Q` / `E` | Abajo / arriba |
+| `Q` / `E` | Abajo / arriba en la nave |
+| `E` | Recoger un tesoro cuando se está a pie y cerca de él |
+| `B` | Solicitar descenso y bajar de la nave; cerca de ella, volver a abordar |
+| `Espacio` | Disparar desde la nave o a pie |
 | Flechas | Cabeceo y guiñada |
 | `Z` / `C` | Alabeo |
 | Botón derecho | Arrastrar para mirar libremente sin girar la nave |
 | `M` / botón central | Alternar timoneo con el ratón |
-| `Shift` / `Ctrl` | Boost / freno |
+| `Shift` / `Ctrl` | Turbo / freno en la nave; `Shift` permite correr a pie |
 | `G` | Gravedad encendida / apagada |
 | `X` | Asistencia de vuelo encendida / apagada |
 | `T` o clic en el botón del HUD | Iniciar / detener el Tour automático |
@@ -73,9 +78,11 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `P` | Captura PNG en `screenshots/vista-N.png` |
 | `Esc` | Salir |
 
-Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos.
+Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos. En tierra, `WASD` mueve al pirata, las flechas giran la vista y el botón derecho permite mirar con el ratón.
 
-En crucero no hay un tope de velocidad de juego: el boost aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Al acercarse a un planeta, la asistencia reduce la velocidad para permitir maniobras finas.
+En crucero no hay un tope de velocidad de juego: el turbo aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Cerca del suelo, el turbo permite superar 2 m/s con mayor facilidad sin perder el control local; al soltarlo vuelve el límite de velocidad de descenso.
+
+En órbita o descenso sobre un planeta aterrizable, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Cada planeta aterrizable tiene un tesoro; el HUD indica su distancia. Las patrullas aparecen cerca de los planetas y persiguen al jugador, también a pie. Cada patrulla resiste dos impactos. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
 
 Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 

@@ -10,6 +10,7 @@ mod hud;
 mod math;
 mod orbits;
 mod particles;
+mod pirates;
 mod platform;
 mod png;
 mod raster;
@@ -48,6 +49,7 @@ fn main() {
              galaxy --bench [--frames N] [--scale S]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
+             galaxy --menu-shot out.png      captura la portada sin ventana\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
              galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
              galaxy [--seed N] [--scale S]   semilla y escala interna fija (1, 0.85, 0.7, 0.55); F6 alterna auto/100%\n\
@@ -72,6 +74,10 @@ fn main() {
     }
     if let Some(out) = arg_value(&args, "--shot") {
         shot::system(Path::new(&out), time, has("--stats")).expect("no se pudo guardar el PNG");
+        return;
+    }
+    if let Some(out) = arg_value(&args, "--menu-shot") {
+        app::menu_shot(Path::new(&out)).expect("no se pudo guardar la portada");
         return;
     }
     if let Some(out) = arg_value(&args, "--atmos-shot") {

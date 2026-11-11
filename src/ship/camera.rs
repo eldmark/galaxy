@@ -28,6 +28,8 @@ pub struct CameraRig {
     pub look_return_rate: f32,
     /// Radianes por píxel de ratón.
     pub sensitivity: f32,
+    /// Cámara a pie: posición absoluta del ojo, conservando la orientación de mirada.
+    pub eye_override: Option<DVec3>,
 }
 
 impl CameraRig {
@@ -40,6 +42,7 @@ impl CameraRig {
             follow_rate: 7.0,
             look_return_rate: 5.0,
             sensitivity: 0.004,
+            eye_override: None,
         }
     }
     /// Copia la orientación de la nave sin retardo (al iniciar o cambiar de cámara).
@@ -73,6 +76,20 @@ impl CameraRig {
             self.look_pitch *= d;
         }
     }
+    /// En tierra la mirada conserva el giro hasta que el jugador vuelve a abordar.
+    pub fn update_foot(&mut self, frame_dt: f64, ship: &Ship, mouse_dx: f32, mouse_dy: f32, turn: Vec3) {
+        let k = 1.0 - (-(self.follow_rate as f64) * frame_dt).exp() as f32;
+        let a = self.follow;
+        let mut b = ship.orientation;
+        if a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0.0 {
+            b = Quat { x: -b.x, y: -b.y, z: -b.z, w: -b.w };
+        }
+        self.follow = Quat { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, z: a.z + (b.z - a.z) * k, w: a.w + (b.w - a.w) * k }.normalized();
+        self.look_yaw -= mouse_dx * self.sensitivity;
+        self.look_pitch = (self.look_pitch - mouse_dy * self.sensitivity).clamp(-1.45, 1.45);
+        self.look_yaw -= turn.y * frame_dt as f32 * 1.8;
+        self.look_pitch = (self.look_pitch + turn.x * frame_dt as f32 * 1.4).clamp(-1.45, 1.45);
+    }
     /// Orientación final de la cámara = seguimiento * mirada libre.
     pub fn orientation(&self) -> Quat {
         (self.follow * Quat::from_axis_angle(Vec3::Y, self.look_yaw) * Quat::from_axis_angle(Vec3::X, self.look_pitch))
@@ -80,7 +97,7 @@ impl CameraRig {
     }
     /// Posición del ojo en el mundo (f64).
     pub fn eye(&self, ship: &Ship) -> DVec3 {
-        eye_position(ship.position, self.orientation(), self.offset)
+        self.eye_override.unwrap_or_else(|| eye_position(ship.position, self.orientation(), self.offset))
     }
     /// Matriz de vista relativa a la cámara (el ojo está en el origen).
     pub fn view_matrix(&self) -> Mat4 {

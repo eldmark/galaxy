@@ -293,6 +293,28 @@ fn panel(fb: &mut Framebuffer, r: Rect) {
     stroke_rect(fb, r, COL_BORDER, 200);
 }
 
+/// Portada del modo pirata. Se compone sobre una vista estática del sistema.
+pub fn draw_start_screen(fb: &mut Framebuffer) {
+    let w = fb.width as i32;
+    let h = fb.height as i32;
+    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [1, 5, 15], 185);
+    let pw = 640.min(w - 20);
+    let ph = 322.min(h - 20);
+    let r = Rect { x: (w - pw) / 2, y: (h - ph) / 2, w: pw, h: ph };
+    panel(fb, r);
+    let center = |fb: &mut Framebuffer, text: &str, y: i32, scale: i32, color| {
+        draw_text_shadow(fb, (w - text_width(text, scale)) / 2, y, text, color, scale);
+    };
+    center(fb, "PIRATAS DE LA GALAXIA", r.y + 30, 3, COL_ACCENT);
+    center(fb, "BUSCA TESOROS. HUYE DE LA POLICIA.", r.y + 83, 2, COL_TEXT);
+    center(fb, "ATERRIZA, EXPLORA Y VUELVE A TU NAVE", r.y + 115, 2, COL_TEXT);
+    center(fb, "WASD VOLAR/CAMINAR   SHIFT TURBO", r.y + 142, 2, COL_DIM);
+    center(fb, "B BAJAR/ABORDAR   E TESORO   ESPACIO DISPARAR", r.y + 168, 2, COL_DIM);
+    let button = Rect { x: w / 2 - 152, y: r.y + 211, w: 304, h: 42 };
+    draw_button(fb, button, "INICIAR [ENTER]", false, true);
+    center(fb, "ESC PARA SALIR", r.y + 276, 1, COL_DIM);
+}
+
 /// Dibuja el HUD completo y devuelve el rectángulo del botón del Tour (para detectar clics).
 pub fn draw_hud(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)) -> Rect {
     draw_hud_layout(fb, state, mouse).tour
@@ -428,7 +450,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 22] = [
+pub const HELP_ROWS: [(&str, &str); 25] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
@@ -437,6 +459,9 @@ pub const HELP_ROWS: [(&str, &str); 22] = [
     ("RATON DER.", "Arrastrar: mirar libre"),
     ("M / BTN MED", "Raton timonea on/off"),
     ("SHIFT", "Boost"),
+    ("ESPACIO", "Disparar a la policia"),
+    ("B", "Bajar / abordar nave"),
+    ("E A PIE", "Recoger tesoro cercano"),
     ("CTRL", "Freno"),
     ("G", "Gravedad on/off"),
     ("X", "Asistencia de vuelo on/off"),

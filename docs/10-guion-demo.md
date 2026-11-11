@@ -1,6 +1,6 @@
 # 10. Guion para la demostración
 
-La ventana se abre con `cargo run --release -- --tour`. Conviene tener `F3` abierto y el proyecto ya compilado. Reserva unos siete minutos para mostrar las partes de la rúbrica y deja los cambios de código para el final.
+La portada se abre con `cargo run --release`; `Enter` inicia el juego. `--tour` omite la portada para ir directo al recorrido automático. Conviene tener `F3` abierto y el proyecto ya compilado. Reserva unos siete minutos para mostrar las partes de la rúbrica y deja los cambios de código para el final.
 
 | Tiempo | Qué mostrar | Qué explicar |
 |---|---|---|
@@ -13,6 +13,8 @@ La ventana se abre con `cargo run --release -- --tour`. Conviene tener `F3` abie
 | 4:45 | `W`, `Shift`, `Ctrl`, `G`, `X` | La nave acelera de forma progresiva con simulación a paso fijo. `G` cambia la gravedad y `X` la asistencia. |
 | 5:30 | `L` y aterrizaje; después `T` | La nave puede bajar, posar el tren y despegar. El Tour une viaje, órbita y aterrizaje. |
 | 6:15 | `F6` y `F3` | La escala interna baja si el tiempo de cuadro se mantiene alto, y el HUD conserva la resolución nativa. Mostrar el benchmark medido en el README. |
+
+Para mostrar el juego pirata después del Tour, toma el control cerca de Verdalia, pulsa `B` para bajar, camina hacia el tesoro indicado en el HUD y recógelo con `E`. Las patrullas se acercan; apunta con el botón derecho o las flechas y dispara con `Espacio`. `Shift` acelera en vuelo local y permite correr a pie. Muestra el agujero negro solo si queda tiempo: se activa al alejarse hacia el borde del sistema.
 
 ## Cambio sencillo en vivo
 

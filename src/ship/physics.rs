@@ -165,6 +165,8 @@ fn level_toward(s: &mut Ship, n: DVec3, k: f64) {
 pub fn boost_factor(s: &Ship) -> f64 {
     if s.mode == NavMode::Cruise && !s.raw_controls {
         BOOST_ACCEL + (BOOST_ACCEL_MAX - BOOST_ACCEL) * (1.0 - (-s.boost_charge / BOOST_RAMP_TAU).exp())
+    } else if matches!(s.mode, NavMode::Orbit | NavMode::Descent) && !s.raw_controls {
+        2.5
     } else {
         BOOST_ACCEL
     }
@@ -198,11 +200,11 @@ fn target_accel(s: &Ship, input: &Input, rel: Option<DVec3>) -> DVec3 {
 }
 
 /// Tope de velocidad (relativa al marco). CRUCERO: solo el límite numérico; ORBITA/DESCENSO: ∝ altitud.
-fn speed_cap(mode: NavMode, alt: f64) -> f64 {
+fn speed_cap(mode: NavMode, alt: f64, turbo: bool) -> f64 {
     match mode {
         NavMode::Cruise => SPEED_LIMIT,
-        NavMode::Orbit => SPEED_LIMIT.min((ORBIT_SPEED_K * alt).max(20.0)),
-        NavMode::Descent => SPEED_LIMIT.min((DESCENT_SPEED_K * alt).max(MIN_SPEED_NEAR_GROUND)),
+        NavMode::Orbit => SPEED_LIMIT.min((ORBIT_SPEED_K * alt).max(if turbo { 45.0 } else { 20.0 })),
+        NavMode::Descent => SPEED_LIMIT.min((DESCENT_SPEED_K * alt).max(if turbo { 25.0 } else { MIN_SPEED_NEAR_GROUND })),
         NavMode::Landed => 0.0,
     }
 }
@@ -249,7 +251,8 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
 
     // --- empuje progresivo: aceleración objetivo -> suavizado exponencial ---
     let a_target = target_accel(s, input, fb.map(|_| rel0));
-    s.accel = s.accel + (a_target - s.accel) * expk(dt, TAU_ACCEL);
+    let accel_tau = if input.boost && matches!(s.mode, NavMode::Orbit | NavMode::Descent) && !s.raw_controls { 0.20 } else { TAU_ACCEL };
+    s.accel = s.accel + (a_target - s.accel) * expk(dt, accel_tau);
 
     // --- gravedad ---
     let g = effective_gravity(s, bodies, t);
@@ -301,7 +304,7 @@ pub fn step(s: &mut Ship, dt: f64, t: f64, input: &Input, bodies: &[Body]) {
     }
 
     // --- límite de velocidad: crucero sin tope de jugabilidad; en local proporcional a la altitud ---
-    let cap = speed_cap(s.mode, alt);
+    let cap = speed_cap(s.mode, alt, input.boost && !s.raw_controls);
     let sp = u.length();
     if sp > cap {
         let excess = sp - cap;
@@ -467,6 +470,15 @@ fn update_gear(s: &mut Ship, dt: f64) {
 mod tests {
     use super::*;
     use crate::world::solar_system;
+
+    #[test]
+    fn turbo_allows_controlled_low_flight_above_two_meters_per_second() {
+        assert_eq!(speed_cap(NavMode::Descent, 0.0, false), MIN_SPEED_NEAR_GROUND);
+        assert_eq!(speed_cap(NavMode::Descent, 0.0, true), 25.0);
+        let mut ship = Ship::new(DVec3::ZERO);
+        ship.mode = NavMode::Descent;
+        assert_eq!(boost_factor(&ship), 2.5);
+    }
 
     fn setup() -> (Vec<Body>, Ship) {
         let bodies = solar_system();

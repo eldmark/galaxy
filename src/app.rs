@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::hud::{HudLayout, HudState, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
+use crate::pirates::PirateGame;
 use crate::raster::{DrawCall, Framebuffer, FragmentShader, RenderOptions, Stats, Uniforms, render_scene};
 use crate::resolution::{Resolution, upscale};
 use crate::shading::{prop_shader, shader_for, shader_for_ring, ship_shader, sky_color};
@@ -379,6 +380,16 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
     let mut layout: Option<HudLayout> = None;
     let mut shots = 0u32;
     let mut fx = crate::fx::FlightFx::new();
+    let mut pirates = PirateGame::new(sim.bodies.len());
+    let menu_background = if start_tour {
+        None
+    } else {
+        let mut stats = Stats::default();
+        scene.render(&mut world_fb, &sim, &cam, &RenderOptions::default(), true, &mut stats);
+        upscale(&world_fb, &mut fb);
+        Some(fb.color.clone())
+    };
+    let mut started = start_tour;
     if start_tour {
         sim.start_tour();
     }
@@ -386,6 +397,13 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         let input = platform.poll();
         if input.quit {
             break;
+        }
+        if !started {
+            if input.start_game || input.mouse_clicked { started = true; continue; }
+            fb.color.copy_from_slice(menu_background.as_ref().unwrap());
+            crate::hud::draw_start_screen(&mut fb);
+            platform.present(&fb);
+            continue;
         }
         show_help ^= input.toggle_help;
         show_stats ^= input.toggle_stats;
@@ -405,16 +423,17 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         if input.toggle_assist {
             sim.ship.flight_assist = !sim.ship.flight_assist;
         }
-        if input.toggle_tour {
+        if input.toggle_tour && !pirates.on_foot() {
             sim.toggle_tour();
         }
-        if input.land_auto {
+        if input.land_auto && !pirates.on_foot() {
             sim.land_here();
         }
-        if let Some(i) = input.select_body {
+        pirates.handle_board(&mut sim, &mut cam, input.toggle_board);
+        if let Some(i) = input.select_body.filter(|_| !pirates.on_foot()) {
             sim.go_to(i);
         }
-        if input.mouse_clicked {
+        if input.mouse_clicked && !pirates.on_foot() {
             if let Some(l) = &layout {
                 if l.tour.contains(input.mouse.0, input.mouse.1) {
                     sim.toggle_tour();
@@ -424,9 +443,16 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
             }
         }
         let dt = platform.frame_time().clamp(0.0, 0.1);
-        sim.frame(dt, &input.ship);
-        cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
+        let old_ship_pos = sim.ship.position;
+        let idle_input = Input::default();
+        sim.frame(dt, if pirates.on_foot() { &idle_input } else { &input.ship });
+        if pirates.on_foot() {
+            cam.update_foot(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.ship.rotate);
+        } else {
+            cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
+        }
         fx.update(&mut sim, &mut cam, dt, input.toggle_orbits, input.respawn);
+        pirates.update(&mut sim, &mut cam, &input.ship, input.collect, input.fire, dt, old_ship_pos);
         if dt > 1e-4 {
             fps += ((1.0 / dt as f32) - fps) * 0.1;
         }
@@ -436,6 +462,7 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         let mut stats = Stats::default();
         let render_start = Instant::now();
         scene.render(&mut world_fb, &sim, &cam, &opts, lod_on, &mut stats);
+        pirates.draw_world(&mut world_fb, &sim, &cam, &mut stats);
         fx.draw_world(&mut world_fb, &sim, &cam);
         upscale(&world_fb, &mut fb);
 
@@ -445,6 +472,7 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
             crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
         }
         fx.draw_hud(&mut fb, &sim);
+        pirates.draw_hud(&mut fb, &sim);
 
         if input.screenshot {
             let _ = std::fs::create_dir_all("screenshots");
@@ -458,6 +486,19 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         platform.present(&fb);
         resolution.update(frame_ms, dt as f32);
     }
+}
+
+/// Captura la portada sin abrir una ventana, útil para revisar su composición.
+pub fn menu_shot(path: &Path) -> std::io::Result<()> {
+    let mut scene = Scene::new();
+    let sim = new_sim();
+    let mut cam = CameraRig::new();
+    cam.snap(&sim.ship);
+    let mut fb = Framebuffer::new(WIDTH, HEIGHT);
+    let mut stats = Stats::default();
+    scene.render(&mut fb, &sim, &cam, &RenderOptions::default(), true, &mut stats);
+    crate::hud::draw_start_screen(&mut fb);
+    fb.save_png(path)
 }
 
 /// Banco de pruebas sin ventana: el mismo recorrido (Tour) con y sin culling/LOD.
