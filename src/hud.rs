@@ -247,6 +247,10 @@ pub struct HudState<'a> {
     pub show_stats: bool,
     pub show_help: bool,
     pub stats: &'a Stats,
+    pub terrain: &'a crate::terrain::TerrainStats,
+    pub scatter: &'a crate::scatter::ScatterStats,
+    pub scale: f32,
+    pub scale_auto: bool,
     pub fps: f32,
     pub culling_on: bool,
     pub lod_on: bool,
@@ -326,8 +330,10 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
     );
     let flw = text_width(&flags, 1);
     draw_text_shadow(fb, w - flw - 10, 30, &flags, COL_DIM, 1);
+    let scale = format!("ESCALA {:.0}% {} [F6]", state.scale * 100.0, if state.scale_auto { "AUTO" } else { "FIJA" });
+    draw_text_shadow(fb, w - text_width(&scale, 1) - 10, 42, &scale, COL_DIM, 1);
     let hint = "F1 AYUDA  F3 STATS";
-    draw_text_shadow(fb, w - text_width(hint, 1) - 10, 42, hint, COL_DIM, 1);
+    draw_text_shadow(fb, w - text_width(hint, 1) - 10, 54, hint, COL_DIM, 1);
 
     // Botones (abajo, centrados).
     let bw = text_width("CANCELAR ATERRIZAJE [L]", 2) + 24;
@@ -385,6 +391,8 @@ pub fn draw_nav_panel(fb: &mut Framebuffer, dest: &str, phase: &str, eta_s: f64)
 
 fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
     let s = state.stats;
+    let t = state.terrain;
+    let o = state.scatter;
     let rows: Vec<(String, [u8; 3])> = vec![
         ("ESTADISTICAS [F3]".to_string(), COL_ACCENT),
         (format!("DRAW CALLS {} (CULL {})", s.draw_calls_total, s.draw_calls_culled), COL_TEXT),
@@ -396,6 +404,14 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
         (format!("MS VERTICES {:.2}", s.ms_vertex), COL_DIM),
         (format!("MS RASTER   {:.2}", s.ms_raster), COL_DIM),
         (format!("MS SOMBREADO {:.2}", s.ms_shade), COL_DIM),
+        (format!("MS ATMOSFERA {:.2}", s.ms_atmosphere), COL_DIM),
+        (format!("ESCALA {:.0}% {}", state.scale * 100.0, if state.scale_auto { "AUTO" } else { "FIJA" }), COL_GOOD),
+        (format!("TERRENO {} CH / {} HOJ", t.drawn, t.leaves), COL_TEXT),
+        (format!("NIVEL {}-{} TRI {}", t.min_level, t.max_level, t.triangles), COL_TEXT),
+        (format!("FALLBACK {} GEN {}", t.fallback, t.generated), COL_TEXT),
+        (format!("MS SELECT {:.2} GEN {:.2}", t.ms_select, t.ms_generate), COL_DIM),
+        (format!("OBJ {} / {} / {}", o.instances_total, o.instances_shown(), o.instances_culled_distance), COL_TEXT),
+        (format!("OBJ TRI {} / {}", o.triangles, o.triangles_without_lod), COL_TEXT),
         (
             format!("CULLING {}  LOD {}", if state.culling_on { "ON" } else { "OFF" }, if state.lod_on { "ON" } else { "OFF" }),
             COL_GOOD,
@@ -404,7 +420,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
     let w = fb.width as i32;
     let pw = 280;
     let ph = 12 + rows.len() as i32 * 14;
-    let r = Rect { x: w - pw - 8, y: 60, w: pw, h: ph };
+    let r = Rect { x: w - pw - 8, y: 70, w: pw, h: ph };
     panel(fb, r);
     for (i, (t, c)) in rows.iter().enumerate() {
         draw_text_shadow(fb, r.x + 8, r.y + 8 + i as i32 * 14, t, *c, 1);
@@ -412,7 +428,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 21] = [
+pub const HELP_ROWS: [(&str, &str); 22] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
@@ -431,6 +447,7 @@ pub const HELP_ROWS: [(&str, &str); 21] = [
     ("K / SUPR", "Reaparecer"),
     ("F1", "Esta ayuda"),
     ("F3 / F4 / F5", "Stats / culling / LOD"),
+    ("F6", "Escala auto / 100%"),
     ("N", "Mapa de normales on/off"),
     ("P", "Captura de pantalla"),
     ("ESC", "Salir"),
@@ -597,6 +614,8 @@ mod tests {
     }
 
     fn state<'a>(stats: &'a Stats) -> HudState<'a> {
+        static TERRAIN: std::sync::LazyLock<crate::terrain::TerrainStats> = std::sync::LazyLock::new(Default::default);
+        static SCATTER: std::sync::LazyLock<crate::scatter::ScatterStats> = std::sync::LazyLock::new(Default::default);
         HudState {
             mode: "CRUCERO",
             nearest_body: "VERDALIA",
@@ -607,6 +626,10 @@ mod tests {
             show_stats: true,
             show_help: false,
             stats,
+            terrain: &TERRAIN,
+            scatter: &SCATTER,
+            scale: 1.0,
+            scale_auto: false,
             fps: 60.0,
             culling_on: true,
             lod_on: false,

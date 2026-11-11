@@ -68,6 +68,40 @@ fn level_follows_distance() {
 }
 
 #[test]
+fn lower_error_threshold_increases_terrain_detail() {
+    let mut t = flat_terrain(8);
+    let cam = cam_at(300.0);
+    t.set_px_threshold(10.0);
+    let normal = t.select(cam, FOV, VH, None);
+    t.set_px_threshold(2.0);
+    let detailed = t.select(cam, FOV, VH, None);
+    assert!(detailed.len() > normal.len(), "F5 debe cambiar las hojas del terreno");
+}
+
+#[test]
+fn warm_prepares_base_without_forcing_all_chunks_at_once() {
+    let mut t = flat_terrain(4);
+    let cam = cam_at(200.0);
+    for _ in 0..100 {
+        if t.base_ready(cam, FOV, VH, None) { break; }
+        let before = t.cache_len();
+        t.warm(cam, FOV, VH, None);
+        assert!(t.cache_len() - before <= 2);
+    }
+    assert!(t.base_ready(cam, FOV, VH, None));
+}
+
+#[test]
+fn quadtree_reuses_fixed_chunk_geometry() {
+    let t = hilly_terrain(8);
+    t.select(cam_at(100.0), FOV, VH, None);
+    let first = t.tree.geom_cache.lock().unwrap().len();
+    assert!(first > 0);
+    t.select(cam_at(100.0), FOV, VH, None);
+    assert_eq!(t.tree.geom_cache.lock().unwrap().len(), first);
+}
+
+#[test]
 fn triangle_count_bounded_while_descending() {
     let t = hilly_terrain(8);
     let mut worst = 0;

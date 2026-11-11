@@ -7,6 +7,7 @@ use crate::hud::{HudLayout, HudState, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
 use crate::raster::{DrawCall, Framebuffer, FragmentShader, RenderOptions, Stats, Uniforms, render_scene};
+use crate::resolution::{Resolution, upscale};
 use crate::shading::{prop_shader, shader_for, shader_for_ring, ship_shader, sky_color};
 use crate::ship::{CameraRig, Input, Sim};
 use crate::world::{altitude, body_model_matrix, nearest_body, solar_system};
@@ -137,6 +138,7 @@ pub struct Scene {
     scatters: Vec<Option<crate::scatter::Scatter>>,
     prop_shader: Box<dyn FragmentShader>,
     pub scatter_stats: crate::scatter::ScatterStats,
+    pub terrain_stats: crate::terrain::TerrainStats,
 }
 
 impl Scene {
@@ -163,6 +165,7 @@ impl Scene {
             },
             prop_shader: prop_shader(),
             scatter_stats: Default::default(),
+            terrain_stats: Default::default(),
         }
     }
 
@@ -197,20 +200,31 @@ impl Scene {
         let aspect = fb.width as f64 / fb.height as f64;
         let mut chunk_sets: Vec<(usize, Vec<(ChunkKey, Arc<Mesh>)>, Vec<(ChunkKey, Arc<Mesh>)>)> = Vec::new();
         self.scatter_stats = Default::default();
+        self.terrain_stats = Default::default();
         self.terrain_triangles = 0;
         for (i, b) in sim.bodies.iter().enumerate() {
             let Some(terrain) = self.terrains[i].as_mut() else { continue };
+            terrain.set_px_threshold(if lod_on { 10.0 } else { 8.0 });
             let alt = dists[i] as f64 / b.radius - 1.0;
-            self.use_terrain[i] = if self.use_terrain[i] { alt < TERRAIN_OFF } else { alt < TERRAIN_ON };
-            if !self.use_terrain[i] {
-                continue;
-            }
             let cam_local = b.world_to_fixed(sim.t, eye - b.position(sim.t));
             let frustum = Frustum::from_camera(cam_local, b.world_to_fixed(sim.t, fwd_w), b.world_to_fixed(sim.t, up_w), FOV_Y as f64, aspect);
+            if self.use_terrain[i] && alt >= TERRAIN_OFF { self.use_terrain[i] = false; }
+            if !self.use_terrain[i] {
+                if alt < 0.9 {
+                    let predicted = eye + sim.ship.velocity * 0.7;
+                    let cam_local = b.world_to_fixed(sim.t + 0.7, predicted - b.position(sim.t + 0.7));
+                    let frustum = Frustum::from_camera(cam_local, b.world_to_fixed(sim.t + 0.7, fwd_w), b.world_to_fixed(sim.t + 0.7, up_w), FOV_Y as f64, aspect);
+                    terrain.warm(cam_local, FOV_Y as f64, fb.height as f64, Some(&frustum));
+                }
+                if alt >= TERRAIN_ON || !terrain.base_ready(cam_local, FOV_Y as f64, fb.height as f64, Some(&frustum)) { continue; }
+                self.use_terrain[i] = true;
+            }
             let chunks = terrain.frame(cam_local, FOV_Y as f64, fb.height as f64, Some(&frustum));
+            self.terrain_stats.add(&terrain.stats);
             self.terrain_triangles += terrain.stats.triangles;
             let props = match self.scatters[i].as_mut() {
                 Some(sc) => {
+                    sc.use_lod = lod_on;
                     let keys: Vec<ChunkKey> = chunks.iter().map(|c| c.0).collect();
                     let p = sc.frame(&keys, cam_local);
                     self.scatter_stats.add(&sc.stats);
@@ -252,12 +266,13 @@ impl Scene {
             let b = &sim.bodies[*i];
             let model = Mat4::translation((b.position(sim.t) - eye).to_f32()) * Mat4::rotation_y(b.rotation_angle(sim.t) as f32);
             let light = (-b.position(sim.t)).normalized().to_f32();
-            for (_, mesh) in chunks {
+            for (key, mesh) in chunks {
+                let detail = if lod_on { (key.level as f32 / TERRAIN_MAX_LEVEL as f32).clamp(0.4, 1.0) } else { 1.0 };
                 calls.push(DrawCall {
                     mesh: mesh.as_ref(),
                     model,
                     shader: self.shaders[*i].as_ref(),
-                    uniforms: Uniforms { light_dir: light, time, detail: 1.0, model },
+                    uniforms: Uniforms { light_dir: light, time, detail, model },
                 });
             }
             // Objetos de superficie: una malla horneada por chunk, en el mismo espacio local y con el MISMO model.
@@ -279,7 +294,9 @@ impl Scene {
             calls.extend(self.ship.draw_calls(ship_model, sim.ship.gear, self.ship_shader.as_ref(), ship_uniforms));
         }
         render_scene(fb, view, proj, &calls, opts, stats);
+        let t_atmos = Instant::now();
         crate::atmosphere::apply(fb, view, FOV_Y, eye, &sim.bodies, sim.t);
+        stats.ms_atmosphere += t_atmos.elapsed().as_secs_f32() * 1000.0;
     }
 }
 
@@ -293,7 +310,7 @@ fn speed_relative(sim: &Sim, idx: usize) -> f64 {
     v.length()
 }
 
-fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, show_help: bool, opts: &RenderOptions, lod_on: bool) -> HudState<'a> {
+fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, scene: &'a Scene, fps: f32, show_stats: bool, show_help: bool, opts: &RenderOptions, lod_on: bool, scale: f32, automatic: bool) -> HudState<'a> {
     let near = nearest_body(&sim.bodies, sim.ship.position, sim.t);
     let nb = &sim.bodies[near];
     HudState {
@@ -306,6 +323,10 @@ fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, sho
         show_stats,
         show_help,
         stats,
+        terrain: &scene.terrain_stats,
+        scatter: &scene.scatter_stats,
+        scale,
+        scale_auto: automatic,
         fps,
         culling_on: opts.frustum_culling,
         lod_on,
@@ -315,6 +336,7 @@ fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, fps: f32, show_stats: bool, sho
 
 /// Renderiza el Tour sin ventana y guarda un PNG cada `every` cuadros en `dir` (para revisar y armar el video).
 pub fn record(dir: &str, frames: u32, every: u32) {
+    assert!(every > 0, "--every debe ser mayor que cero");
     std::fs::create_dir_all(dir).expect("no se pudo crear el directorio");
     let mut scene = Scene::new();
     let mut sim = new_sim();
@@ -328,13 +350,11 @@ pub fn record(dir: &str, frames: u32, every: u32) {
         sim.frame(1.0 / 60.0, &Input::default());
         cam.update(1.0 / 60.0, &sim.ship, 0.0, 0.0, false);
         fx.update(&mut sim, &mut cam, 1.0 / 60.0, false, false);
-        if f % every != 0 {
-            continue;
-        }
         let mut stats = Stats::default();
         scene.render(&mut fb, &sim, &cam, &opts, true, &mut stats);
         fx.draw_world(&mut fb, &sim, &cam);
-        draw_hud_layout(&mut fb, &hud_state(&sim, &stats, 60.0, true, false, &opts, true), (-1.0, -1.0));
+        if f % every != 0 { continue; }
+        draw_hud_layout(&mut fb, &hud_state(&sim, &stats, &scene, 60.0, true, false, &opts, true, 1.0, false), (-1.0, -1.0));
         fx.draw_hud(&mut fb, &sim);
         let path = format!("{dir}/frame-{:06}.png", f / every);
         fb.save_png(Path::new(&path)).expect("no se pudo guardar el cuadro");
@@ -342,13 +362,16 @@ pub fn record(dir: &str, frames: u32, every: u32) {
     println!("{} cuadros guardados en {dir} (t = {:.1} s de simulación, visitados: {})", frames.div_ceil(every), sim.t, sim.autopilot.visited.len());
 }
 
-pub fn run(start_tour: bool) {
+pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
     let mut platform = Platform::new(WIDTH, HEIGHT, "Galaxy | renderizador por software");
     let mut scene = Scene::new();
     let mut sim = new_sim();
     let mut cam = CameraRig::new();
     cam.snap(&sim.ship);
     let mut fb = Framebuffer::new(WIDTH, HEIGHT);
+    let mut resolution = Resolution::new(fixed_scale);
+    let (rw, rh) = resolution.dimensions(WIDTH, HEIGHT);
+    let mut world_fb = Framebuffer::new(rw, rh);
     let (mut show_stats, mut show_help) = (false, false);
     let mut opts = RenderOptions::default();
     let mut lod_on = true;
@@ -372,6 +395,7 @@ pub fn run(start_tour: bool) {
         if input.toggle_lod {
             lod_on = !lod_on;
         }
+        if input.toggle_resolution && fixed_scale.is_none() { resolution.toggle(); }
         if input.toggle_normalmap {
             crate::shading::set_normal_map(!crate::shading::normal_map_enabled());
         }
@@ -407,11 +431,15 @@ pub fn run(start_tour: bool) {
             fps += ((1.0 / dt as f32) - fps) * 0.1;
         }
 
+        let (rw, rh) = resolution.dimensions(WIDTH, HEIGHT);
+        if world_fb.width != rw || world_fb.height != rh { world_fb = Framebuffer::new(rw, rh); }
         let mut stats = Stats::default();
-        scene.render(&mut fb, &sim, &cam, &opts, lod_on, &mut stats);
-        fx.draw_world(&mut fb, &sim, &cam);
+        let render_start = Instant::now();
+        scene.render(&mut world_fb, &sim, &cam, &opts, lod_on, &mut stats);
+        fx.draw_world(&mut world_fb, &sim, &cam);
+        upscale(&world_fb, &mut fb);
 
-        let state = hud_state(&sim, &stats, fps, show_stats, show_help, &opts, lod_on);
+        let state = hud_state(&sim, &stats, &scene, fps, show_stats, show_help, &opts, lod_on, resolution.scale(), resolution.automatic);
         layout = Some(draw_hud_layout(&mut fb, &state, input.mouse));
         if sim.autopilot.active {
             crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
@@ -426,13 +454,17 @@ pub fn run(start_tour: bool) {
                 println!("captura guardada en {path}");
             }
         }
+        let frame_ms = render_start.elapsed().as_secs_f32() * 1000.0;
         platform.present(&fb);
+        resolution.update(frame_ms, dt as f32);
     }
 }
 
 /// Banco de pruebas sin ventana: el mismo recorrido (Tour) con y sin culling/LOD.
-pub fn bench(frames: u32) {
-    println!("Recorrido del Tour: {frames} cuadros a 60 Hz de simulación, {WIDTH}x{HEIGHT}");
+pub fn bench(frames: u32, fixed_scale: Option<f32>) {
+    let resolution = Resolution::new(fixed_scale.or(Some(1.0)));
+    let (rw, rh) = resolution.dimensions(WIDTH, HEIGHT);
+    println!("Recorrido del Tour: {frames} cuadros a 60 Hz de simulación, {rw}x{rh} ({:.0} %)", resolution.scale() * 100.0);
     println!("{:<26} {:>9} {:>9} {:>12} {:>12} {:>10}", "configuración", "ms medio", "ms máx", "tris entrada", "tris dibuj.", "calls cull");
     for (name, on) in [("culling + LOD", true), ("sin culling, sin LOD", false)] {
         let mut scene = Scene::new();
@@ -440,12 +472,13 @@ pub fn bench(frames: u32) {
         let mut cam = CameraRig::new();
         cam.snap(&sim.ship);
         sim.start_tour();
-        let mut fb = Framebuffer::new(WIDTH, HEIGHT);
+        let mut fb = Framebuffer::new(rw, rh);
         let opts = RenderOptions { frustum_culling: on, backface_culling: true };
         let (mut total_ms, mut max_ms) = (0.0f64, 0.0f64);
+        let mut peak = (0u32, crate::terrain::TerrainStats::default(), crate::scatter::ScatterStats::default(), Stats::default());
         let (mut tin, mut tdrawn, mut culled) = (0u64, 0u64, 0u64);
-        let (mut m_sky, mut m_v, mut m_r, mut m_s) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        for _ in 0..frames {
+        let (mut m_sky, mut m_v, mut m_r, mut m_s, mut m_a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for frame in 0..frames {
             sim.frame(1.0 / 60.0, &Input::default());
             cam.update(1.0 / 60.0, &sim.ship, 0.0, 0.0, false);
             let mut stats = Stats::default();
@@ -453,7 +486,10 @@ pub fn bench(frames: u32) {
             scene.render(&mut fb, &sim, &cam, &opts, on, &mut stats);
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             total_ms += ms;
-            max_ms = max_ms.max(ms);
+            if ms > max_ms {
+                max_ms = ms;
+                peak = (frame, scene.terrain_stats.clone(), scene.scatter_stats.clone(), stats.clone());
+            }
             tin += stats.triangles_in;
             tdrawn += stats.triangles_drawn;
             culled += stats.draw_calls_culled as u64;
@@ -461,6 +497,7 @@ pub fn bench(frames: u32) {
             m_v += stats.ms_vertex;
             m_r += stats.ms_raster;
             m_s += stats.ms_shade;
+            m_a += stats.ms_atmosphere;
         }
         let n = frames as u64;
         println!(
@@ -473,7 +510,10 @@ pub fn bench(frames: u32) {
             culled / n
         );
         let f = frames as f32;
-        println!("    etapas (ms/cuadro): cielo {:.2}  vértices {:.2}  raster {:.2}  sombreado {:.2}", m_sky / f, m_v / f, m_r / f, m_s / f);
+        println!("    etapas (ms/cuadro): cielo {:.2}  vértices {:.2}  raster {:.2}  sombreado {:.2}  atmosfera {:.2}", m_sky / f, m_v / f, m_r / f, m_s / f, m_a / f);
+        println!("    pico cuadro {}: terreno {} ch / {} hojas / {} tris, gen {} ({:.2} ms), select {:.2} ms, objetos {} tris / {} horneados, entrada {} tris, vertices {:.2} ms, sombreado {:.2} ms",
+            peak.0, peak.1.drawn, peak.1.leaves, peak.1.triangles, peak.1.generated, peak.1.ms_generate, peak.1.ms_select,
+            peak.2.triangles, peak.2.baked, peak.3.triangles_in, peak.3.ms_vertex, peak.3.ms_shade);
     }
 }
 

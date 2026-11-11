@@ -16,7 +16,10 @@ Enunciado original: `PROYECTO_FINAL GRAFICAS 2026.md` (en esta carpeta).
 | 05 | `05-hitos-y-pruebas.md` | Hitos con criterios de aceptación, pruebas, video, entrega |
 | 06 | `06-reutilizacion-y-riesgos.md` | Qué se copia de `cargar-modelo` y `lab6`, riesgos |
 | 07 | `07-assets-y-temas.md` | Planetas extra, assets inspirados en Star Wars/Marvel/Jurassic Park/Dune, vegetación por planeta |
+| 08 | `08-contratos-y-agentes.md` | Contratos de módulos y coordinación de trabajo |
+| 09 | `09-estado.md` | Estado comprobado y tareas antes de la entrega |
 | 10 | `10-guion-demo.md` | Guion de la demostración en vivo y preguntas probables del profesor |
+| 11 | `11-continuacion-perf-y-docs.md` | Nota de continuidad de rendimiento y documentación |
 
 ## Visión en una frase
 

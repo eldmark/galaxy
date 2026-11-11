@@ -102,6 +102,8 @@ pub struct Stats {
     pub ms_shade: f32,
     /// Fondo estelar (lo mide el coordinador, no el rasterizador).
     pub ms_sky: f32,
+    /// Atmósfera compuesta tras el sombreado.
+    pub ms_atmosphere: f32,
 }
 
 /// Dibuja todas las llamadas con `view` y `proj`. No limpia el framebuffer.

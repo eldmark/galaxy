@@ -8,6 +8,9 @@ use super::cubesphere::{face_uv_to_dir};
 use crate::math::DVec3;
 use super::chunk::HeightFn;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::collections::HashMap;
+const MAX_GEOM_CACHE: usize = 32_768;
 
 /// Planos del frustum en el marco local del planeta: `(normal hacia adentro, d)`; un punto `p` está dentro si `n·p + d >= 0`.
 #[derive(Clone, Debug)]
@@ -61,6 +64,25 @@ pub struct TerrainStats {
     pub ms_generate: f32,
 }
 
+impl TerrainStats {
+    pub fn add(&mut self, o: &Self) {
+        if self.drawn == 0 { self.min_level = o.min_level; }
+        else if o.drawn > 0 { self.min_level = self.min_level.min(o.min_level); }
+        self.max_level = self.max_level.max(o.max_level);
+        self.visited += o.visited;
+        self.culled_horizon += o.culled_horizon;
+        self.culled_frustum += o.culled_frustum;
+        self.leaves += o.leaves;
+        self.drawn += o.drawn;
+        self.triangles += o.triangles;
+        self.fallback += o.fallback;
+        self.generated += o.generated;
+        self.cache_size += o.cache_size;
+        self.ms_select += o.ms_select;
+        self.ms_generate += o.ms_generate;
+    }
+}
+
 /// Geometría conservadora de un nodo.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeGeom {
@@ -89,10 +111,15 @@ pub struct Quadtree {
     /// Si existe, los nodos profundos (nivel >= 5) acotan el relieve con una rejilla de 5x5 muestras de la altura
     /// (+25 % de la amplitud de margen) en vez de la amplitud completa: esferas envolventes más justas para el frustum.
     pub height: Option<Arc<HeightFn>>,
+    /// La geometría de cada clave es fija: evita repetir 25 muestras de relieve por nodo y cuadro.
+    pub geom_cache: Arc<Mutex<HashMap<ChunkKey, NodeGeom>>>,
 }
 
 impl Quadtree {
     pub fn geom(&self, key: &ChunkKey) -> NodeGeom {
+        if key.level >= 5 {
+            if let Some(g) = self.geom_cache.lock().unwrap().get(key) { return *g; }
+        }
         let r = self.radius;
         let (u0, u1, v0, v1) = (key.u_at(0), key.u_at(GRID), key.v_at(0), key.v_at(GRID));
         let (um, vm) = ((u0 + u1) * 0.5, (v0 + v1) * 0.5);
@@ -124,14 +151,19 @@ impl Quadtree {
         }
         let edge = (0..4).map(|i| ((corners[i] - corners[(i + 1) % 4]) * r).length()).fold(0.0f64, f64::max);
         let skirt = SKIRT_FRAC * edge;
-        NodeGeom {
+        let geom = NodeGeom {
             center,
             cdir,
             bound_r: far + relief + skirt + 1e-6 * r,
             geo_r: far,
             ang,
             spacing: edge / GRID as f64,
+        };
+        if key.level >= 5 {
+            let mut cache = self.geom_cache.lock().unwrap();
+            if cache.len() < MAX_GEOM_CACHE { cache.insert(*key, geom); }
         }
+        geom
     }
 
     /// Ángulo máximo (desde la dirección de la cámara) en que puede verse un nodo, o `PI` si no se puede descartar.

@@ -19,6 +19,7 @@ pub struct UiInput {
     pub toggle_stats: bool,  // F3
     pub toggle_culling: bool, // F4
     pub toggle_lod: bool,    // F5
+    pub toggle_resolution: bool, // F6
     pub toggle_normalmap: bool, // N
     pub screenshot: bool,    // P
     pub quit: bool,
@@ -205,6 +206,7 @@ impl Platform {
             toggle_stats: rl.is_key_pressed(KEY_F3),
             toggle_culling: rl.is_key_pressed(KEY_F4),
             toggle_lod: rl.is_key_pressed(KEY_F5),
+            toggle_resolution: rl.is_key_pressed(KEY_F6),
             toggle_normalmap: rl.is_key_pressed(KEY_N),
             screenshot: rl.is_key_pressed(KEY_P),
             quit: rl.is_key_pressed(KEY_ESCAPE),
@@ -347,12 +349,15 @@ mod tests {
         let mut p = Platform::new(960, 540, "galaxy smoke");
         let mut fb = Framebuffer::new(960, 540);
         let stats = crate::raster::Stats::default();
+        let terrain = crate::terrain::TerrainStats::default();
+        let scatter = crate::scatter::ScatterStats::default();
         for _ in 0..60 {
             let inp = p.poll();
             fb.clear([10, 20, 40]);
             let st = crate::hud::HudState {
                 mode: "CRUCERO", nearest_body: "VERDALIA", altitude_m: 1234.0, speed_ms: 5.0, tour_active: false,
                 tour_status: "", show_stats: true, show_help: false, stats: &stats, fps: 60.0,
+                terrain: &terrain, scatter: &scatter, scale: 1.0, scale_auto: false,
                 culling_on: true, lod_on: true, land_active: false,
             };
             crate::hud::draw_hud_layout(&mut fb, &st, inp.mouse);

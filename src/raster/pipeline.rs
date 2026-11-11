@@ -369,10 +369,7 @@ pub(super) fn render(
             continue;
         }
         let (nm, sign) = normal_matrix(&call.model);
-        let verts: Vec<VOut> = mesh
-            .vertices
-            .par_iter()
-            .map(|v| {
+        let transform = |v: &crate::geometry::Vertex| {
                 let pv = mv.transform_point(v.position);
                 let clip = proj.transform_point4(pv);
                 let n = v.normal;
@@ -382,8 +379,12 @@ pub(super) fn render(
                     nm[2][0] * n.x + nm[2][1] * n.y + nm[2][2] * n.z,
                 ) * sign;
                 VOut { clip, normal: n.normalized() }
-            })
-            .collect();
+            };
+        let verts: Vec<VOut> = if mesh.vertices.len() >= 4096 {
+            mesh.vertices.par_iter().map(transform).collect()
+        } else {
+            mesh.vertices.iter().map(transform).collect()
+        };
         cdata.push(CallData { mv, flip: sign < 0.0, verts });
     }
 
@@ -399,9 +400,7 @@ pub(super) fn render(
         stats.triangles_in += ntri as u64;
         let nchunks = ntri.div_ceil(CHUNK);
         let cull_back = opts.backface_culling;
-        let parts: Vec<(Vec<Tri>, [u64; 3])> = (0..nchunks)
-            .into_par_iter()
-            .map(|chunk| {
+        let process_chunk = |chunk: usize| {
                 let mut out = Vec::new();
                 let mut cnt = [0u64; 3]; // backface, clipped_out, drawn
                 for t in chunk * CHUNK..((chunk + 1) * CHUNK).min(ntri) {
@@ -441,8 +440,12 @@ pub(super) fn render(
                     }
                 }
                 (out, cnt)
-            })
-            .collect();
+            };
+        let parts: Vec<(Vec<Tri>, [u64; 3])> = if nchunks >= 4 {
+            (0..nchunks).into_par_iter().map(process_chunk).collect()
+        } else {
+            (0..nchunks).map(process_chunk).collect()
+        };
         for (v, cnt) in parts {
             stats.triangles_backface += cnt[0];
             stats.triangles_clipped_out += cnt[1];

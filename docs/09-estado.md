@@ -1,58 +1,32 @@
 # 09. Estado del proyecto
 
-Última actualización: 2026-11-05 (tras la segunda tanda de agentes). Entrega: 20/11/2026.
+Actualizado el 11/11/2026. Entrega: 20/11/2026.
 
-## Hecho (fase rúbrica-100, integrado en `main`)
+## Lo que ya funciona
 
-| Área | Estado | Dónde |
-|---|---|---|
-| Pipeline de software (M/V/P, z-buffer 1/w, tiles con rayon, sombreado diferido) | listo, 16 pruebas | `src/raster/` |
-| Frustum culling + contadores | listo | `raster::render_scene`, HUD F3/F4 |
-| LOD de esferas por tamaño en pantalla (6 niveles, histéresis) | listo | `geometry::lod`, `app::Scene` |
-| Subdivisión procedural (icosfera) y deformación por ruido | listo (la deformación aún no se usa en los planetas) | `geometry::sphere` |
-| Shaders propios: sol, Verdalia, Siroco, Mutante, Nix, Fornax, anillo, nave, cielo | listo; 5 animados | `src/shading/` |
-| Órbitas y rotación por tiempo, gravedad, colisión, modos Cruise/Orbit/Descent/Landed | listo | `src/world/`, `src/ship/` |
-| Aceleración y giro progresivos con paso fijo 120 Hz | listo, probado con distintos dt | `ship::stepper`, `ship::physics` |
-| Tour automático y aterrizaje automático con botones | listo (aterriza y despega en Fornax, Verdalia, Mutante, Nix) | `ship::autopilot`, `app.rs` |
-| HUD propio (fuente bitmap, botones, estadísticas, ayuda) | listo | `src/hud.rs` |
-| Ventana e entrada (raylib solo en `platform.rs`) | listo | `src/platform.rs` |
-| Nave modelada por nosotros (script paramétrico) + 3 props | listo | `assets/` |
+Galaxy dibuja el sistema en CPU con matrices propias, recorte, z-buffer 1/w, tiles paralelos y sombreado diferido. Raylib solo aparece en `src/platform.rs` para la ventana, las entradas y la textura final. Hay un sol y cinco planetas con posición orbital y rotación calculadas a partir del tiempo de simulación. Los shaders de los cuerpos están en `src/shading/`.
 
-## Medición (release, 16 hilos, 960x540, recorrido del Tour)
+La nave usa física a paso fijo de 1/120 s, gravedad, colisión contra el relieve y modos de crucero, órbita, descenso y posada. Puede viajar con las teclas `1`-`6`, seguir el Tour con `T`, aterrizar de forma asistida con `L` y reaparecer con `K` o `Supr`. El sol tiene zona letal y hay muerte por impacto a más de 120 m/s. La mirada libre usa el botón derecho y `M` activa el timoneo con el ratón.
 
-`cargo run --release -- --bench --frames 600`
+Cerca del suelo se dibuja terreno cube-sphere por chunks y quadtree (`src/terrain/`). Los objetos de `src/scatter/` se reparten con una semilla reproducible, se orientan según la normal del relieve y comparten la transformación del planeta. El mapa de normales se alterna con `N`. Hay atmósfera, líneas de órbita con `O` y tren de aterrizaje animado.
 
-| Configuración | ms medio | triángulos entrada | triángulos dibujados | draw calls descartadas |
-|---|---|---|---|---|
-| culling + LOD | 8.7 | 2 000 | 832 | 3 |
-| sin culling, sin LOD | 10.9 | 124 572 | 17 771 | 0 |
+Esta continuación añadió escala interna automática en cuatro pasos, `F6` para alternar auto/100 % y `--scale` para fijarla. El HUD sigue a 960x540, muestra la escala y amplía `F3` con terreno y objetos. `F5` afecta esferas, terreno, objetos y detalle de shader; `F4` afecta el culling por frustum del rasterizador.
 
-Nota: el cuello de botella ahora es el sombreado de los planetas grandes (~6.5 ms), no la geometría. El fondo estelar bajó de 27 ms a 1.2 ms al pasarlo a un cubemap precalculado. Falta medir en un equipo de 4 núcleos.
+Para repartir el costo de la entrada al terreno se preparan hasta dos chunks por cuadro desde una cámara predicha 0.7 s hacia adelante, y la esfera se mantiene hasta que los ancestros visibles están listos. El quadtree guarda la geometría fija de sus nodos para no volver a muestrear el relieve en cada cuadro. El rasterizador procesa las mallas pequeñas sin crear tareas paralelas por cada llamada.
 
 ## Verificación
 
-- `cargo test`: 74 pruebas pasan, 3 ignoradas (benchmarks y prueba con ventana).
-- Cuadros del Tour revisados a mano (`--record`): alineación, órbita, descenso y posada en Verdalia con el HUD correcto.
-- Ventana interactiva abre y corre sin errores (8 s con `--tour`). **Pendiente**: probar los controles manuales con teclado y ratón.
+- `cargo test`: 182 pruebas pasan y 4 se ignoran en el worktree de continuación.
+- El benchmark completo de 6300 cuadros de `main` alcanzó 13.88 ms medios y 53.15 ms de pico con culling, LOD y 16 hilos; la ejecución se interrumpió antes de imprimir la segunda configuración. En esta rama, con escala 1.0, fueron 12.47 ms medios y 45.94 ms de pico. Sin culling ni LOD, esta rama dio 14.15 ms medios y 57.67 ms de pico. La etapa de selección del quadtree estuvo en 0.19 ms durante el pico de esa última configuración gracias a la caché geométrica.
+- En 600 cuadros, con culling y LOD, la escala 0.7 bajó la media de 15.25 a 6.33 ms con 16 hilos, de 23.45 a 12.28 ms con cuatro y de 42.80 a 23.13 ms con dos. La tabla completa está en el README. Ese tramo no recorre todo el descenso y no sirve para afirmar un pico del Tour completo.
+- En dos hilos y escala 0.55 la media de esos 600 cuadros fue 19.38 ms. Con cuatro hilos y escala 0.85 fue 22.76 ms. El controlador evita volver a una escala que acaba de superar el umbral alto hasta que haya margen suficiente.
+- Se revisaron cuadros PNG del Tour con `F3` abierto, tanto en espacio como en descenso. El panel cabe en 960x540 y deja libres los botones. `scripts/video.sh` convirtió una secuencia corta a MP4 con `ffmpeg`.
+- Tras corregir `--record` para renderizar todos los cuadros aunque solo guarde uno cada K, un cuadro espaciado del descenso mostró 260 hojas de terreno y 87 instancias de objetos; antes ese modo dejaba las cachés incompletas en capturas muy separadas.
 
-## Actualización: segunda tanda integrada
+La meta de pico menor que 25 ms a escala 1.0 sigue pendiente: el mayor cuadro medido fue 45.94 ms y no generó terreno ni objetos; el sombreado ocupó 36.49 ms. La atmósfera promedió 2.33 ms por cuadro en el Tour completo a 16 hilos. Conviene revisar esos picos en la máquina de presentación y usar la escala automática si hacen que el vuelo se sienta entrecortado.
 
-| Área | Estado |
-|---|---|
-| Tren de aterrizaje animado (`src/shipmodel.rs`, grupos OBJ) | integrado |
-| Relieve por planeta (`src/relief.rs`), LOD deformado por cuerpo, colisión y aterrizaje contra el relieve | integrado |
-| Viaje a destino (teclas 1-6), mirada libre (botón derecho), timoneo con ratón (`M`) | integrado |
-| Terreno cube-sphere con LOD continuo (`src/terrain/`): se usa al bajar de 0.5 radios | integrado |
-| README, `scripts/video.sh`, `scripts/record-demo.sh`, `docs/10-guion-demo.md` | integrado |
+En el mismo Tour de 6300 cuadros a 16 hilos y escala 0.7 se midieron 8.01 ms medios y 44.21 ms de pico con culling y LOD; el pico fue el primer cuadro. Con ambos apagados se midieron 9.25 ms medios y 34.09 ms de pico. El benchmark no incluye el costo de reescalar ni de dibujar el HUD.
 
-Tour completo con descenso y aterrizaje (`--bench --frames 6300`): 11.2 ms medio, 46 ms máximo (pico al generar los primeros chunks), 960x540.
-Pruebas: 121 pasan, 3 ignoradas.
+## Pendiente antes de entregar
 
-## Pendiente (orden sugerido)
-
-1. Probar a mano los controles (teclado y ratón) y la sensación de vuelo.
-2. Objetos en superficie con distribución por semilla (árbol, obsidiana, cristal): `src/scatter.rs`.
-3. Mapa de normales y atmósfera según altitud (cielo azul cerca del suelo, como en `terrain/demo.rs`).
-4. Reducir el pico de 46 ms (precalentar chunks bajo la nave durante el descenso).
-5. Mutante/Dunara/Nublar con vegetación propia; HUD con las estadísticas del terreno.
-6. Grabar el video y rellenar `[NOMBRE]`, capturas y enlace en el README.
+Hay que probar manualmente los controles en la ventana real y grabar el video final. El integrante debe completar `[NOMBRE]`, la contribución y el enlace del video en el README. La luna de Verdalia y los planetas Dunara, Nublar y Egrin siguen como ampliaciones posibles. Las capturas del Tour y el ajuste visual del polvo y la explosión del sol necesitan una última revisión humana.

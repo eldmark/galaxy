@@ -49,10 +49,10 @@ impl Terrain {
     pub fn with_height(kind: BodyKind, radius_m: f64, max_level: u8, amp: f64, height: Arc<HeightFn>) -> Self {
         Self {
             kind,
-            tree: Quadtree { radius: radius_m, amp, min_level: 2.min(max_level), max_level, px_threshold: 10.0, height: Some(height.clone()) },
+            tree: Quadtree { radius: radius_m, amp, min_level: 2.min(max_level), max_level, px_threshold: 10.0, height: Some(height.clone()), geom_cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())) },
             height,
             cache: ChunkCache::new(512),
-            budget: 24,
+            budget: 8,
             stats: TerrainStats::default(),
         }
     }
@@ -78,6 +78,38 @@ impl Terrain {
     /// Solo la selección del quadtree (sin generar nada). `frustum = None`: solo se descarta por horizonte.
     pub fn select(&self, cam_local: DVec3, fov_y: f64, viewport_h: f64, frustum: Option<&Frustum>) -> Vec<ChunkKey> {
         self.tree.select(cam_local, fov_y, viewport_h, frustum).0
+    }
+
+    /// Prepara unos pocos ancestros y hojas antes del cambio de esfera a terreno.
+    pub fn warm(&mut self, cam_local: DVec3, fov_y: f64, viewport_h: f64, frustum: Option<&Frustum>) {
+        let leaves = self.select(cam_local, fov_y, viewport_h, frustum);
+        let mut keys = Vec::new();
+        for mut k in leaves.iter().copied() {
+            while k.level > self.tree.min_level { k = k.parent().unwrap(); }
+            if !self.cache.contains(&k) && !keys.contains(&k) { keys.push(k); }
+            if keys.len() >= 2 { break; }
+        }
+        if keys.len() < 2 {
+            for &k in &leaves {
+                if !self.cache.contains(&k) && !keys.contains(&k) { keys.push(k); }
+                if keys.len() >= 2 { break; }
+            }
+        }
+        if !keys.is_empty() {
+            self.cache.begin_frame();
+            let radius = self.tree.radius;
+            let height = self.height.clone();
+            self.cache.generate(&keys, &move |k| build_chunk(k, radius, &*height));
+            self.cache.evict();
+        }
+    }
+
+    pub fn base_ready(&self, cam_local: DVec3, fov_y: f64, viewport_h: f64, frustum: Option<&Frustum>) -> bool {
+        self.select(cam_local, fov_y, viewport_h, frustum).iter().all(|&leaf| {
+            let mut k = leaf;
+            while k.level > self.tree.min_level { k = k.parent().unwrap(); }
+            self.cache.contains(&k)
+        })
     }
 
     /// Un cuadro: selecciona, genera hasta `budget` chunks faltantes en paralelo (los más cercanos primero) y devuelve

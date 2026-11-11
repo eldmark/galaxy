@@ -2,16 +2,14 @@
 
 Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Es un sistema solar pequeño en Rust: un sol, cinco planetas con órbita y rotación, una nave propia que se controla con inercia, gravedad y colisión, y un Tour automático que viaja de planeta en planeta, orbita, desciende y aterriza. Todo el dibujo se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib solo abre la ventana, lee el teclado y el ratón y muestra el framebuffer como una textura 2D.
 
-[CAPTURA: portada, nave frente a un planeta con el HUD y el panel de estadísticas abierto]
-
-![Aproximación a Verdalia durante el Tour](screenshots/tour-aproximacion.png)
+![Sistema solar](screenshots/sistema.png)
 
 ## Compilar y ejecutar
 
 Necesitas Rust (edición 2024, cargo reciente), CMake y un compilador de C, porque `raylib` construye su biblioteca nativa la primera vez. Las únicas dependencias son `raylib` y `rayon` (ver `Cargo.toml`); Cargo las descarga solo.
 
 ```bash
-cargo test                       # 74 pruebas (3 ignoradas: benchmarks y una con ventana)
+cargo test                       # pruebas unitarias y de integración
 cargo run --release              # ventana interactiva 960x540
 cargo run --release -- --tour    # igual, pero con el Tour automático ya iniciado
 ```
@@ -26,7 +24,14 @@ Opciones de línea de comandos (las que imprime `--help`):
 | `--bench [--frames N]` | Recorre el Tour sin ventana con y sin culling/LOD y compara tiempos y triángulos (N=3000 por defecto) |
 | `--record DIR [--frames N] [--every K]` | Guarda en `DIR` un PNG cada K cuadros del Tour (N=1800 y K=60 por defecto), sin ventana |
 | `--shot out.png [--time T] [--stats]` | Vista del sistema en un PNG (`--stats` imprime los contadores) |
-| `--shot-ship out.png [--time T]` | Vista de la nave en un PNG |
+| `--shot-ship out.png [--gear G]` | Vista de la nave en un PNG; G va de 0 (tren plegado) a 1 (desplegado) |
+| `--surface-shot out.png --body verdalia --alt 40 [--seed N]` | Vista de los objetos sobre el suelo |
+| `--atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]` | Vista de atmósfera y comparación del mapa de normales |
+| `--terrain-shot out.png [--alt M] [--kind verdalia]` | Demostración del terreno con LOD |
+| `--orbits-shot out.png` | Líneas de órbita desde arriba |
+| `--death-shot DIR` / `--landing-shot DIR` | Secuencias de muerte y aterrizaje asistido |
+| `--seed N` | Distribución reproducible de objetos, 1 por defecto |
+| `--scale S` | Escala interna fija: 1, 0.85, 0.7 o 0.55; se aplica en ventana y `--bench` |
 
 Para generar el video de la demostración se necesita `ffmpeg`:
 
@@ -36,6 +41,7 @@ scripts/video.sh frames video.mp4   # solo convierte un directorio de cuadros (6
 ```
 
 `record-demo.sh` acepta `CUADROS` y `CADA_K` como argumentos (`scripts/record-demo.sh 3600 1`). Cada PNG pesa unos 2 MB, así que 90 s con `CADA_K=2` ocupan unos 5 GB en `frames/` (carpeta ignorada por git). Si la secuencia se grabó con `--every K`, `video.sh` necesita `FPS_ENTRADA=$((60/K))`; `record-demo.sh` ya lo hace.
+El modo `--record` renderiza todos los cuadros para mantener las cachés del terreno y los objetos al día, pero solo guarda un PNG cada K cuadros.
 
 ## Controles
 
@@ -48,6 +54,8 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `Q` / `E` | Abajo / arriba |
 | Flechas | Cabeceo y guiñada |
 | `Z` / `C` | Alabeo |
+| Botón derecho | Arrastrar para mirar libremente sin girar la nave |
+| `M` / botón central | Alternar timoneo con el ratón |
 | `Shift` / `Ctrl` | Boost / freno |
 | `G` | Gravedad encendida / apagada |
 | `X` | Asistencia de vuelo encendida / apagada |
@@ -55,12 +63,19 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `L` o botón `ATERRIZAR AUTO` | Aterrizaje automático (solo si la nave está en ORBITA o DESCENSO sobre un planeta aterrizable) |
 | `F1` | Ayuda con la tabla de controles |
 | `F3` | Panel de estadísticas del pipeline |
-| `F4` | Frustum culling encendido / apagado |
+| `F4` | Frustum culling de las llamadas del rasterizador encendido / apagado |
 | `F5` | LOD encendido / apagado |
+| `F6` | Alternar resolución automática y 100 %, salvo si se fijó `--scale` |
+| `N` | Mapa de normales encendido / apagado |
+| `O` | Líneas de órbita encendidas / apagadas |
+| `K` / `Supr` | Reaparecer |
+| `1`-`6` | Viajar al cuerpo elegido; `1` es el sol |
 | `P` | Captura PNG en `screenshots/vista-N.png` |
 | `Esc` | Salir |
 
 Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos.
+
+En crucero no hay un tope de velocidad de juego: el boost aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Al acercarse a un planeta, la asistencia reduce la velocidad para permitir maniobras finas.
 
 Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 
@@ -86,7 +101,7 @@ src/world        raster/pipeline.rs (todo el rasterizador)                      
 | HUD | Fuente bitmap y botones dibujados en el framebuffer | `src/hud.rs` |
 | Ventana | Único módulo que usa raylib | `src/platform.rs` |
 
-[CAPTURA: diagrama o foto del panel F3 con todos los contadores]
+El panel `F3` muestra también las hojas y triángulos del terreno, los objetos dibujados o descartados y la escala interna. El HUD se dibuja a 960x540 incluso si el mundo se renderiza a una escala menor.
 
 ## Cumplimiento de los requisitos eliminatorios
 
@@ -106,7 +121,7 @@ El video debe mostrar vuelo espacial, acercamiento, vuelta alrededor de un plane
 
 ## Características del menú que se solicitan evaluar y dónde verlas
 
-Los contadores de `F3` son: `DRAW CALLS (CULL n)`, `TRI ENTRADA`, `TRI BACKFACE`, `TRI CLIPPED`, `TRI DIBUJADOS`, `PIXELES SOMBR.` y los milisegundos de vértices, raster y sombreado.
+Los contadores de `F3` incluyen llamadas y triángulos del rasterizador, hojas y triángulos del terreno, instancias y triángulos de objetos, tiempos de vértices, raster, sombreado y atmósfera, y escala interna.
 
 | Característica | Estado | Dónde está | Cómo demostrarlo en vivo |
 |---|---|---|---|
@@ -116,16 +131,19 @@ Los contadores de `F3` son: `DRAW CALLS (CULL n)`, `TRI ENTRADA`, `TRI BACKFACE`
 | Deformación por ruido | Hecho | `relief::height` (`src/relief.rs`) desplaza cada planeta (Verdalia ±3 %, Fornax ±3.5 %, Nix ±2 %, Mutante ±2.5 % en 16 escalones) mediante `geometry::displace`; `relief::displaced_lods` genera la malla de cada nivel de LOD | Mirar la silueta de Verdalia o Fornax de cerca: ya no es una esfera lisa |
 | Subdivisión procedural de geometría | Hecho | `icosphere(n)` en `src/geometry/sphere.rs` genera 20·4ⁿ triángulos; `SphereLods` crea los niveles 0 a 5 al arrancar | Con `F5` apagado todos los planetas usan el nivel 5; con `F5` encendido se ve `TRI ENTRADA` bajar |
 | Descarte fuera de vista (culling) | Hecho | Frustum culling por esfera y descarte de caras traseras en `raster/pipeline.rs`; contadores en `Stats` (`src/raster/mod.rs`) | `F3`; mirar a otro lado y ver subir `CULL` en `DRAW CALLS`; `F4` apaga el frustum culling y `TRI ENTRADA` sube |
-| Niveles de detalle (LOD) | Hecho | LOD de geometría por error de silueta en píxeles: `SphereLods::select_with_hysteresis` en `src/geometry/lod.rs`. LOD del shader: el uniforme `detail` y `octaves` en `src/shading/noise.rs`, calculado en `Scene::render` (`src/app.rs`) | `F3` y alejarse o acercarse a un planeta viendo `TRI ENTRADA`; `F5` apaga todo el LOD |
+| Niveles de detalle (LOD) | Hecho | Esferas por error de silueta, terreno por quadtree y objetos con malla completa o simplificada. `F5` cambia los tres y el detalle de los shaders | `F3` y `F5`: comparar triángulos de entrada, hojas de terreno y triángulos de objetos |
+| Objetos propios y distribución con semilla | Hecho | `src/scatter/` coloca árboles, espiras, cristales y edificios en el marco local del planeta; `--seed N` cambia la distribución | `--surface-shot` con semillas distintas; `F3` muestra instancias y triángulos |
+| Orientación sobre superficie curva | Hecho | `src/scatter/place.rs` orienta cada objeto según la normal del relieve; `Scene::render` aplica a los objetos la misma matriz que al terreno | Ver un bosque al girar el planeta; los objetos siguen pegados a él |
+| Mapa de normales | Hecho | `src/shading/normalmap.rs`, controlado con `N` | Alternar `N` cerca del suelo o comparar `--atmos-shot` con `--no-normalmap` |
 | Aceleración progresiva con paso fijo | Hecho | `src/ship/stepper.rs` (`FixedStepper`, 1/120 s con acumulador) y `src/ship/physics.rs`: la entrada fija una aceleración objetivo que la nave alcanza con constante de tiempo `TAU_ACCEL` (`src/ship/modes.rs`) | Mantener `W` y ver el `VEL` del HUD subir gradualmente; soltar y ver que se frena con suavidad. La prueba `fixed_step_is_frame_rate_independent` lo asegura |
 | Gravedad | Hecho | `Body::gravity_at` en `src/world/mod.rs` y `effective_gravity` en `src/ship/physics.rs` | Apagar la asistencia con `X`, acercarse a un planeta con `G` activo y soltar los motores: la trayectoria se curva. Con `G` apagada sigue recta |
-| Colisión | Hecho (contra el relieve) | `collide` en `src/ship/physics.rs`: nave como esfera de 6 m contra `surface_height_at` (radio * (1 + `relief::height`)) | Dirigirse al suelo sin frenar: rebota; a baja velocidad se posa (modo POSADA) |
+| Colisión | Hecho (contra el relieve) | `sweep_collisions` y `collide` en `src/ship/physics.rs`: barrido del movimiento y nave como esfera de 6 m contra `surface_height_at` | Un contacto suave permite posarse; un impacto por encima de 120 m/s destruye la nave y permite reaparecer |
 | Control local alrededor de un planeta | Hecho | Modos ORBITA y DESCENSO en `update_mode` (`src/ship/physics.rs`) y constantes en `src/ship/modes.rs`; la nave hereda el movimiento del planeta | El HUD (`MODO`) cambia a ORBITA al bajar de 3 radios; el planeta deja de "escaparse" y se puede rodear a baja velocidad |
 | Presentación | Hecho | HUD con modo, planeta cercano, altitud y velocidad, botones del Tour, ayuda (`F1`) y estadísticas (`F3`) en `src/hud.rs` | `F1` y `F3` |
 
 También funcionan, aunque no están en la lista de puntos: Tour automático y aterrizaje automático (`src/ship/autopilot.rs`), anillo de Siroco como malla propia (`geometry::ring_mesh`) y cielo con cubemap.
 
-El terreno con chunks y LOD continuo ya se usa al bajar de 0.5 radios de altitud (`src/terrain/`, integrado en `Scene::render` de `src/app.rs`). En desarrollo y todavía no implementado: objetos de superficie (los modelos `tree.obj`, `obsidian.obj` e `ice_crystal.obj` ya existen en `assets/models/` pero la escena no los carga), distribución con semilla, mapa de normales, luna de Verdalia, y los planetas Dunara, Nublar y Egrin de `docs/07-assets-y-temas.md`. El tren de aterrizaje ya se anima (`src/shipmodel.rs`). El plan está en `docs/`.
+El terreno con chunks y LOD continuo se usa al bajar de 0.5 radios de altitud (`src/terrain/`). La atmósfera, el tren de aterrizaje animado, el aterrizaje asistido, el sol letal y la muerte por impacto también están integrados. Quedan como ampliaciones la luna de Verdalia y los planetas Dunara, Nublar y Egrin (`docs/07-assets-y-temas.md`).
 
 ## Parámetros para cambiar en la demostración
 
@@ -142,37 +160,47 @@ Se cambian en el código y se recompila con `cargo run --release` (no hay archiv
 | Intensidad del bump y parallax de Fornax | Banderas `bump` y `parallax` de `VolcanicShader` (`shader_for` en `src/shading/mod.rs`); fuerza en `src/shading/volcanic.rs`: factores `0.014` (placas), `0.10` (basalto) y `0.03` (parallax) | Poner `bump: false` o `parallax: false` y comparar con Fornax de cerca |
 | Cantidad de continentes y nubes en Verdalia | Umbrales `smooth(0.44, 0.54, ...)` (tierra) y `smooth(0.54, 0.63, ...)` (nubes) en `src/shading/rocky.rs` | Cambia de inmediato la apariencia de Verdalia |
 | Velocidad de la tormenta y el sol | `t * 0.45` en `src/shading/giant.rs`; `t * 0.32` en `src/shading/sun.rs` | |
-| Respuesta de la nave | `ACCEL_FWD`, `TAU_ACCEL`, `RATE_*`, `CRUISE_SPEED`, `BOOST_SPEED` en `src/ship/modes.rs` | |
+| Respuesta de la nave | `ACCEL_FWD`, `TAU_ACCEL`, `RATE_*`, `BOOST_ACCEL_MAX`, `BOOST_RAMP_TAU` y `SPEED_LIMIT` en `src/ship/modes.rs` | |
 | Resolución | `WIDTH` y `HEIGHT` en `src/app.rs` | |
 | Frecuencia de simulación | `FixedStepper::default_120` en `src/ship/stepper.rs` | |
 
 ## Medición de rendimiento
 
-`cargo run --release -- --bench --frames 600` recorre el mismo Tour sin ventana, primero con culling y LOD y después sin ellos. Medido en la máquina de desarrollo (16 hilos lógicos, 960x540, modo release), con otros procesos usando la CPU al mismo tiempo, así que los milisegundos varían entre ejecuciones de 10 a 15 ms:
+`--bench --frames 600` mide el comienzo del Tour sin ventana. Se usó la compilación `--release` y se fijaron hilos y escala. Cada fila de abajo tiene culling y LOD encendidos. El programa también imprime la comparación con ambos apagados.
 
-| Configuración | ms medio | ms máx | triángulos entrada | triángulos dibujados | draw calls descartadas |
-|---|---|---|---|---|---|
-| culling + LOD | 10.33 | 45.67 | 2 000 | 832 | 3 |
-| sin culling, sin LOD | 10.79 | 27.36 | 124 572 | 17 771 | 0 |
+| Hilos Rayon | Escala | ms medio | ms máximo | Triángulos de entrada por cuadro | Atmósfera, ms/cuadro |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 1.0 | 15.25 | 44.98 | 22 404 | 1.99 |
+| 16 | 0.7 | 6.33 | 20.96 | 17 797 | 0.78 |
+| 4 | 1.0 | 23.45 | 46.77 | 22 404 | 3.77 |
+| 4 | 0.7 | 12.28 | 34.56 | 17 797 | 1.88 |
+| 2 | 1.0 | 42.80 | 58.76 | 22 404 | 7.08 |
+| 2 | 0.7 | 23.13 | 43.85 | 17 797 | 3.64 |
 
-Desglose por etapa (ms por cuadro): con culling y LOD, cielo 1.52, vértices 0.38, raster 0.64, sombreado 7.71. Sin ellos, cielo 1.22, vértices 1.84, raster 0.82, sombreado 6.86.
+La escala automática baja un paso cuando el promedio móvil supera 22 ms durante alrededor de 0.5 s; sube cuando se mantiene bajo 13 ms durante 2 s. Si el paso superior acababa de ser demasiado lento, solo vuelve a intentarlo cuando la media cae bajo 10.5 ms, para evitar saltos continuos entre dos escalas. Por eso se espera que baje en máquinas de dos o cuatro hilos, aunque el controlador todavía requiere una prueba visual en la ventana real. El HUD permanece a 960x540. `--bench` mide el renderizado interno; no incluye el reescalado ni el HUD.
 
-Lectura honesta: el LOD y el culling reducen los triángulos de entrada unas 60 veces y la etapa de vértices casi 5 veces, pero el tiempo total cambia poco porque el cuello de botella es el sombreado por píxel de los planetas grandes, que no depende del número de triángulos. Todavía no se midió en un equipo de 4 núcleos. Los contadores en vivo están en `F3`.
+Como referencia adicional, con dos hilos y escala 0.55 la media de 600 cuadros fue 19.38 ms; con cuatro hilos y escala 0.85 fue 22.76 ms.
 
-[CAPTURA: panel F3 con culling y LOD encendidos, y otra con `F4` y `F5` apagados]
+Estas cifras varían con la carga de la máquina. Los primeros 600 cuadros aún no incluyen el descenso, por lo que el máximo de esta tabla no describe todo el Tour. La medición de 6300 cuadros y el pico cerca del suelo están en `docs/09-estado.md`.
+
+En 6300 cuadros con 16 hilos, culling y LOD, la escala 1.0 dio 12.47 ms medios y 45.94 ms máximos; la escala 0.7 dio 8.01 ms medios y 44.21 ms máximos. El pico a 0.7 fue el primer cuadro, con 38.03 ms de sombreado. La meta de 25 ms máximos aún no se cumple. Al apagar culling y LOD, la media subió a 14.15 ms en escala 1.0 y a 9.25 ms en 0.7.
+
+`F4` desactiva el culling por frustum de las llamadas del rasterizador; la selección del quadtree todavía limita los chunks del terreno. `F5` fuerza las esferas a su malla más fina, reduce el umbral del terreno de 10 a 8 píxeles y usa los modelos completos de objetos dentro del rango de dibujo.
 
 ## Capturas
 
 | | |
 |---|---|
 | ![Sistema](screenshots/sistema.png) | ![Nave](screenshots/nave.png) |
-| `--shot screenshots/sistema.png --time 5` | `--shot-ship screenshots/nave.png --time 3` |
-| ![Tour, crucero](screenshots/tour-crucero.png) | ![Tour, órbita](screenshots/tour-orbita.png) |
-| Cuadro del Tour (`--record`) acercándose a Verdalia | Cuadro del Tour orbitando |
-
-[CAPTURA: aterrizaje en un planeta, nave posada]
-[CAPTURA: Fornax de cerca, lava animada]
-[CAPTURA: Siroco con su anillo]
+| `--shot screenshots/sistema.png --time 5` | `--shot-ship screenshots/nave.png --gear 1` |
+| ![Superficie de Verdalia](screenshots/superficie-verdalia.png) | ![Superficie de Fornax](screenshots/superficie-fornax.png) |
+| `--surface-shot --body verdalia` | `--surface-shot --body fornax` |
+| ![Atmósfera desde el espacio](screenshots/atmosfera-espacio.png) | ![Órbitas](screenshots/orbitas.png) |
+| `--atmos-shot --space` | `--orbits-shot` |
+| ![Distribución con semilla 7](screenshots/superficie-semilla7.png) | ![Mapa de normales activado](screenshots/con-normalmap.png) |
+| `--surface-shot --seed 7` | `--atmos-shot` |
+| ![Mapa de normales desactivado](screenshots/sin-normalmap.png) | |
+| `--atmos-shot --no-normalmap` | |
 
 ## Recursos externos y asistencia de IA
 
@@ -180,8 +208,8 @@ Lectura honesta: el LOD y el culling reducen los triángulos de entrada unas 60 
 - **Dependencias.** Solo `raylib` 5.5 (ventana, entrada y textura 2D) y `rayon` 1 (paralelismo por tiles).
 - **Shaders.** Adaptados del laboratorio de la materia `lab6` (Atlas de mundos): Ígnea, Verdalia, Siroco, Mutante, Nix y Fornax, portados a este pipeline.
 - **Pipeline.** El lector de OBJ y la idea del rasterizado baricéntrico con z-buffer vienen del laboratorio `cargar-modelo`; aquí se reescribieron con tiles, punto fijo y sombreado diferido.
-- **Modelos.** La nave y los tres props (árbol, obsidiana, cristal de hielo) los generé con scripts propios en `assets/src/` (`make_ship.py`, `make_props.py`, `meshlib.py`), sin Blender y sin modelos descargados. Detalles en `assets/models/ship.md`.
-- No se usan texturas ni imágenes externas; todo el color sale de ruido procedural.
+- **Modelos.** La nave y cuatro objetos de superficie (árbol, obsidiana, cristal de hielo y edificio) salen de scripts en `assets/src/` (`make_ship.py`, `make_props.py`, `meshlib.py`), sin modelos descargados. Detalles en `assets/models/ship.md`.
+- No se usan texturas ni imágenes externas en la escena; el color sale de shaders procedurales y de los colores de vértice de los modelos.
 
 ## Integrantes y contribuciones
 

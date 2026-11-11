@@ -14,6 +14,7 @@ mod platform;
 mod png;
 mod raster;
 mod relief;
+mod resolution;
 mod scatter;
 mod shading;
 mod ship;
@@ -29,6 +30,14 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
 }
 
+fn requested_scale(args: &[String]) -> Option<f32> {
+    arg_value(args, "--scale").map(|raw| {
+        let value: f32 = raw.parse().expect("--scale requiere 1, 0.85, 0.7 o 0.55");
+        assert!(resolution::SCALES.iter().any(|s| (s - value).abs() < 0.001), "--scale requiere 1, 0.85, 0.7 o 0.55");
+        value
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let has = |f: &str| args.iter().any(|a| a == f);
@@ -36,12 +45,12 @@ fn main() {
     if has("--help") {
         println!(
             "galaxy [--tour]                 ventana interactiva (--tour inicia el piloto automático)\n\
-             galaxy --bench [--frames N]     compara con/sin culling y LOD sin ventana\n\
+             galaxy --bench [--frames N] [--scale S]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
              galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
-             galaxy [--seed N]               semilla de la distribución de objetos en superficie (por defecto 1)\n\
+             galaxy [--seed N] [--scale S]   semilla y escala interna fija (1, 0.85, 0.7, 0.55); F6 alterna auto/100%\n\
              galaxy --surface-shot out.png --body verdalia --alt 40 [--seed N] [--time T]   suelo con árboles/espiras/cristales/edificios\n\
              galaxy --orbits-shot out.png     lineas de orbita vistas desde arriba\n\
              galaxy --death-shot DIR          acercarse al sol hasta morir (cuadros PNG)\n\
@@ -53,6 +62,7 @@ fn main() {
     if let Some(seed) = arg_value(&args, "--seed").and_then(|n| n.parse().ok()) {
         scatter::set_global_seed(seed);
     }
+    let fixed_scale = requested_scale(&args);
     if let Some(out) = arg_value(&args, "--surface-shot") {
         surface_shot::run(Path::new(&out), &args);
         return;
@@ -91,8 +101,8 @@ fn main() {
     }
     if has("--bench") {
         let frames = arg_value(&args, "--frames").and_then(|n| n.parse().ok()).unwrap_or(3000);
-        app::bench(frames);
+        app::bench(frames, fixed_scale);
         return;
     }
-    app::run(has("--tour"));
+    app::run(has("--tour"), fixed_scale);
 }
