@@ -29,7 +29,7 @@ Un solo mundo continuo (sin escenas): el mismo bucle dibuja el sol, planetas peq
 
 1. **Todo en CPU.** El enunciado prohíbe shaders de GPU, cámara 3D, modelos, materiales y física de raylib; incumplirlo da 0. Raylib solo abre la ventana, lee entradas y sube el framebuffer a una textura 2D para mostrarlo (igual que en `lab6`). "Usar más poder" significa **hilos de CPU** (rayon, por tiles), no GPU.
 2. **Aterrizar es un extra.** El enunciado dice que no se requiere. Se construye sobre la base obligatoria (hito M4 ya cumple todo lo eliminatorio) y no la pone en riesgo.
-3. **"Planetas que tengan órbita"**: todos los planetas orbitan el sol. Son aterrizables todos menos Siroco (gigante gaseoso, sin suelo: se puede rozar la capa de nubes y la presión empuja hacia arriba) y el sol.
+3. **"Planetas que tengan órbita"**: todos los planetas orbitan el sol. Los cinco son aterrizables; en Siroco se posa la nave sobre una capa de nubes jugable. El sol no es aterrizable.
 4. **Piloto automático (decidido)**: un **botón** (HUD clicable y tecla `T`) inicia un **tour automático** que viaja de planeta en planeta, orbita, desciende con **animación de aterrizaje**, espera y despega. En el suelo **no hay recorrido automático**: la nave posada solo se mueve por control del jugador.
 5. **Planetas pequeños** (estilo Mario Galaxy / Outer Wilds): radios de 2 a 6 km, órbitas cercanas, viajes de 30 a 60 s entre planetas.
 6. **Trabajo individual (decidido).** Una sola persona: el alcance se prioriza con P0/P1/P2 (ver `05` y `07`). Los puntos de la lista se sostienen con P0; lo demás es ampliación.

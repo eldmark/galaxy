@@ -57,7 +57,7 @@ visitar(nodo):
 |---|---|---|---|---|
 | Ígnea (sol) | 8 km | fija en el centro | lenta | emisivo, corona, no aterrizable |
 | Verdalia | 3.5 km | 35 km | 1 vuelta/90 s | luna **real** (radio 0.9 km) orbitando; nubes en capa propia; aterrizable |
-| Siroco | 6 km | 80 km | rápida | anillo como malla (anillo plano, prueba z); no aterrizable, solo capa de nubes |
+| Siroco | 6 km | 80 km | rápida | anillo como malla (anillo plano, prueba z); aterrizaje sobre una capa de nubes jugable |
 | Mutante | 2 km | 55 km | 1 vuelta/60 s | shader pixel; terreno cuantizado; aterrizable |
 | Nix | 2.5 km | 105 km | lenta | hielo, cristales; aterrizable |
 | Fornax | 3 km | 22 km | 1 vuelta/70 s | lava animada, bump+parallax; aterrizable |

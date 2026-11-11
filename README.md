@@ -26,7 +26,7 @@ Opciones de línea de comandos (las que imprime `--help`):
 | `--shot out.png [--time T] [--stats]` | Vista del sistema en un PNG (`--stats` imprime los contadores) |
 | `--menu-shot out.png` | Captura la portada en PNG sin abrir la ventana |
 | `--shot-ship out.png [--gear G]` | Vista de la nave en un PNG; G va de 0 (tren plegado) a 1 (desplegado) |
-| `--surface-shot out.png --body verdalia --alt 40 [--seed N]` | Vista de los objetos sobre el suelo |
+| `--surface-shot out.png --body verdalia --alt 40 [--seed N]` | Vista de la superficie; `--body siroco` muestra la capa de nubes |
 | `--atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]` | Vista de atmósfera y comparación del mapa de normales |
 | `--terrain-shot out.png [--alt M] [--kind verdalia]` | Demostración del terreno con LOD |
 | `--orbits-shot out.png` | Líneas de órbita desde arriba |
@@ -82,7 +82,7 @@ Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos.
 
 En crucero no hay un tope de velocidad de juego: el turbo aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Cerca del suelo, el turbo permite superar 2 m/s con mayor facilidad sin perder el control local; al soltarlo vuelve el límite de velocidad de descenso.
 
-En órbita o descenso sobre un planeta aterrizable, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Cada planeta aterrizable tiene un tesoro; el HUD indica su distancia. Las patrullas aparecen cerca de los planetas y persiguen al jugador, también a pie. Cada patrulla resiste dos impactos. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
+En órbita o descenso sobre un planeta, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Los cinco planetas admiten aterrizaje; en Siroco se camina sobre una capa de nubes jugable. Cada planeta tiene un tesoro y el HUD indica su distancia. Las patrullas aparecen cerca de los planetas y persiguen al jugador, también a pie. Cada patrulla resiste dos impactos. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
 
 Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 

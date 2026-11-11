@@ -208,7 +208,8 @@ pub fn solar_system() -> Vec<Body> {
         b(Fornax, "Fornax", 3000.0, 22000.0, 500.0, 70.0, 0.05, 0.5, g(3000.0), true),
         b(Verdalia, "Verdalia", 3500.0, 35000.0, 800.0, 90.0, 0.08, 2.0, g(3500.0), true),
         b(Mutante, "Mutante", 2000.0, 55000.0, 1200.0, 60.0, 0.10, 4.0, g(2000.0), true),
-        b(Siroco, "Siroco", 6000.0, 80000.0, 1800.0, 45.0, 0.04, 1.0, g(6000.0), false),
+        // La capa superior de nubes funciona como plataforma flotante para el modo pirata.
+        b(Siroco, "Siroco", 6000.0, 80000.0, 1800.0, 45.0, 0.04, 1.0, g(6000.0), true),
         b(Nix, "Nix", 2500.0, 105000.0, 2400.0, 110.0, 0.12, 5.2, g(2500.0), true),
     ]
 }

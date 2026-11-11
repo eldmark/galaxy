@@ -756,7 +756,7 @@ mod tests {
                 println!("t={:.1} {:?} tgt={} mode={:?} alt={:.0} speed={:.0} pos={:?}", sim.t, sim.autopilot.phase, sim.autopilot.target, sim.ship.mode, sim.ship.altitude, sim.ship.velocity.length(), (sim.ship.position.x as i64, sim.ship.position.y as i64, sim.ship.position.z as i64));
                 lastph = sim.autopilot.phase;
             }
-            if sim.autopilot.takeoffs as usize >= n_land || sim.t > 9.0 * 60.0 {
+            if sim.autopilot.takeoffs as usize >= n_land || sim.t > 15.0 * 60.0 {
                 break;
             }
         }
@@ -764,7 +764,7 @@ mod tests {
         assert!(seen_landed);
         assert_eq!(landed_bodies.len(), n_land, "debe aterrizar en todos los landable");
         assert_eq!(sun_contacts, 0, "no debe tocar el sol");
-        assert!(max_t < 8.0 * 60.0, "tour demasiado largo: {max_t}");
+        assert!(max_t < 14.0 * 60.0, "tour demasiado largo: {max_t}");
     }
 
     #[test]

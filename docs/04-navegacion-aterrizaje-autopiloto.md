@@ -51,7 +51,7 @@ a_i = G·M_i / (r² + ε²)   dirigida al centro del cuerpo i, solo si r < r_inf
 
 - Nave como esfera de radio ~6 m. Chequeo: `|p| - radio_nave < height(dir(p))`.
 - Respuesta: se empuja a la altura de contacto y se elimina la componente normal de la velocidad (rebote amortiguado). Mismo `height()` que el terreno visible, así no hay discrepancias.
-- Cuerpos sin suelo (sol, Siroco): esfera de colisión a la capa de nubes / fotosfera; Siroco aplica empuje suave hacia afuera.
+- El sol no tiene suelo: su fotosfera es letal. Siroco usa la capa superior de nubes como superficie jugable para aterrizar y explorar.
 
 ## DESCENSO y aterrizaje
 

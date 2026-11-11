@@ -138,7 +138,7 @@ pub struct Scatter {
 }
 
 impl Scatter {
-    /// `None` si el cuerpo no tiene especies (sol, Siroco).
+    /// `None` si el cuerpo no tiene especies de objetos (sol, Siroco).
     pub fn new(kind: BodyKind, radius: f64, seed: u64, models: Arc<Models>) -> Option<Self> {
         let placer = Placer::new(kind, radius, seed);
         if placer.species.is_empty() {

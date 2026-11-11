@@ -94,7 +94,7 @@ impl Species {
     }
 }
 
-/// Especies de cada cuerpo. Siroco y el sol no tienen suelo: lista vacía.
+/// Especies de cada cuerpo. La capa de nubes de Siroco no tiene objetos; el sol tampoco.
 pub fn species_for(kind: BodyKind) -> Vec<Species> {
     match kind {
         BodyKind::Sun | BodyKind::Siroco => Vec::new(),

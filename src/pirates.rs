@@ -390,4 +390,27 @@ mod tests {
         assert_eq!(game.police_defeated, 1);
         assert!(game.police.is_empty());
     }
+    #[test]
+    fn siroco_can_land_and_disembark() {
+        let mut sim = new_sim();
+        let i = 4;
+        let b = &sim.bodies[i];
+        let radial = b.position(0.0).normalized();
+        sim.ship.position = b.position(0.0) + radial * (b.radius + 2500.0);
+        sim.ship.velocity = b.velocity(0.0);
+        sim.ship.mode = NavMode::Orbit;
+        sim.ship.frame = Some(i);
+        let mut game = PirateGame::new(sim.bodies.len());
+        let mut cam = CameraRig::new();
+        game.handle_board(&mut sim, &mut cam, true);
+        assert!(game.pending_disembark);
+        for _ in 0..(120 * 120) {
+            let previous = sim.ship.position;
+            sim.frame(1.0 / 120.0, &Input::default());
+            game.update(&mut sim, &mut cam, &Input::default(), false, false, 1.0 / 120.0, previous);
+            if game.on_foot() { break; }
+        }
+        assert!(game.on_foot(), "debe aterrizar y bajar de la nave en Siroco");
+        assert!(game.treasures[i].is_some(), "Siroco debe tener un tesoro");
+    }
 }

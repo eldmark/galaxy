@@ -25,6 +25,7 @@ pub fn run(out: &Path, args: &[String]) {
         "fornax" => BodyKind::Fornax,
         "nix" => BodyKind::Nix,
         "mutante" => BodyKind::Mutante,
+        "siroco" => BodyKind::Siroco,
         _ => BodyKind::Verdalia,
     };
     let bodies = solar_system();
@@ -32,7 +33,10 @@ pub fn run(out: &Path, args: &[String]) {
 
     // Sitio con más objetos (misma semilla que usará la escena).
     let models = Arc::new(Models::load("assets/models").expect("assets/models"));
-    let spot = Scatter::new(kind, body.radius, crate::scatter::global_seed(), models).expect("este cuerpo no tiene objetos").find_dense_spot_facing(2000, Some(body.world_to_fixed(time, body.position(time) * -1.0).normalized()));
+    let sunward = body.world_to_fixed(time, body.position(time) * -1.0).normalized();
+    let spot = Scatter::new(kind, body.radius, crate::scatter::global_seed(), models)
+        .map(|scatter| scatter.find_dense_spot_facing(2000, Some(sunward)))
+        .unwrap_or(sunward);
     let r = crate::world::surface_height(&body, spot);
     let local = spot * (r + alt);
     let mut sim = Sim::new(bodies, body.position(time) + body.fixed_to_world(time, local));

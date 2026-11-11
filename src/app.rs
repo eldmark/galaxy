@@ -155,7 +155,8 @@ impl Scene {
             ring_shader: shader_for_ring(),
             ship,
             ship_shader: ship_shader(),
-            terrains: bodies.iter().map(|b| b.landable.then(|| Terrain::new(b.kind, b.radius, TERRAIN_MAX_LEVEL))).collect(),
+            // La capa de nubes de Siroco es lisa: necesita menos subdivisiones que el terreno rocoso.
+            terrains: bodies.iter().map(|b| b.landable.then(|| Terrain::new(b.kind, b.radius, if b.kind == crate::world::BodyKind::Siroco { 6 } else { TERRAIN_MAX_LEVEL }))).collect(),
             use_terrain: vec![false; bodies.len()],
             terrain_triangles: 0,
             scatters: {
