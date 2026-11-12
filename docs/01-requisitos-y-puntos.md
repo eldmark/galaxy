@@ -5,14 +5,14 @@
 | Requisito | Cómo se cumple | Hito |
 |---|---|---|
 | Pipeline de software propio; raylib solo ventana/entrada/mostrar framebuffer | Módulo `raster` propio; sin `draw_model`, `Camera3D`, shaders GLSL | M1 |
-| Sol, nave modelada por nosotros, ≥1 planeta | Nave y objetos modelados en Blender y exportados a OBJ | M2 |
+| Sol, nave modelada por nosotros, ≥1 planeta | Nave y objetos generados con scripts propios y exportados a OBJ | M2 |
 | Nave controlable | `ship` con empuje y giro | M3 |
-| Planeta orbita y rota según tiempo transcurrido (no cuadros) | `time_s` acumulado con reloj real; órbita = f(t) analítica | M2 |
+| Planeta orbita y rota según tiempo transcurrido (no cuadros) | `sim.t` avanza con paso fijo; órbita = f(t) analítica | M2 |
 | Acercarse y alejarse sin pantalla de carga | Un solo mundo, LOD continuo | M5 |
 | Orientar la nave y ver el entorno al acercarse | Cámara de nave con mirada libre | M3 |
 | Matrices de modelo/vista/proyección + prueba de profundidad | `math::Mat4`, z-buffer por tile | M1 |
 | ≥1 shader de fragmentos propio | Shaders de planeta en `shading` | M2 |
-| Entrega: código, recursos, instrucciones, video del recorrido completo | README + `scripts/videos.sh` | M10 |
+| Entrega: código, recursos, instrucciones, video del recorrido completo | README + `scripts/record-demo.sh` y `scripts/video.sh`; el video final sigue pendiente | M10 |
 
 El video debe mostrar: vuelo espacial, acercamiento, vuelta alrededor de un planeta y alejamiento. El guion está en `05-hitos-y-pruebas.md`.
 
@@ -24,7 +24,7 @@ Hay 200 disponibles y la nota máxima es 100. Meta: **~150 puntos** para tener m
 
 | Planeta | Identidad | Origen |
 |---|---|---|
-| Verdalia | Continentes, océano, nubes, costas con Conway, luna real en órbita | `lab6` `rocky` |
+| Verdalia | Continentes, océano y nubes | `lab6` `rocky` |
 | Siroco | Gigante gaseoso con bandas, tormenta y anillo como geometría | `lab6` `giant` |
 | Nix | Planeta glacial con vetas cristalinas y cristales de hielo | `lab6` `nix` |
 | Fornax | Volcánico con grietas de lava, bump y parallax | `lab6` `fornax` |
@@ -40,7 +40,7 @@ Sol: `lab6` `star` (Ígnea). No cuenta como planeta pero sí como shader.
 | Distribución procedural con semilla | 10 | `scatter` con hash determinista por chunk; semilla en configuración y `--seed` |
 | Orientación sobre superficie curva mientras rota | 5 | Las instancias viven en el espacio local del planeta; la normal sale del gradiente del terreno |
 
-### Renderizado (52 de 60)
+### Renderizado (60 puntos posibles)
 
 | Característica | Pts | Plan |
 |---|---|---|
@@ -76,8 +76,8 @@ Dirección artística coherente (paleta y siluetas) y controles claros (pantalla
 
 ### Total estimado
 
-50 + 35 + 52 + 30 + 15 + 10 = **192**. Con un recorte táctico (p. ej. dejar mapeo de normales o un shader) siguen quedando >150. El orden de recorte está en `06-reutilizacion-y-riesgos.md`.
+50 + 35 + 60 + 30 + 15 + 10 = **200 puntos posibles**. El README indica dónde ver cada característica implementada. La nota máxima es 100 y los puntos reales dependen de que cada característica funcione y se pueda explicar en la demostración.
 
 ## Qué decir en la demostración
 
-Cada integrante debe explicar una contribución concreta y poder cambiar un parámetro en vivo. Dejar estos parámetros accesibles por consola/archivo `config.toml` o teclas: radio del planeta, velocidad orbital, semilla de distribución, intensidad del bump, umbral de LOD.
+Cada integrante debe explicar una contribución concreta y poder cambiar un parámetro en vivo. El radio y la velocidad orbital se cambian en `src/world/mod.rs`, la semilla con `--seed` y el umbral de LOD en `src/geometry/lod.rs`.

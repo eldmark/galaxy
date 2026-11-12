@@ -1,10 +1,49 @@
-//! ÚNICO módulo que importa raylib: ventana, entrada y presentar el framebuffer.
-//! Dueño: agente `ui`. Raylib se usa solo para: crear la ventana, leer teclado/ratón, subir el
-//! framebuffer RGBA a una textura 2D y mostrarla escalada. Nada de dibujo 3D, modelos ni cámaras.
+//! ÚNICO módulo que importa raylib: ventana, entrada, audio y presentación del framebuffer.
+//! Raylib crea la ventana, lee teclado y ratón, reproduce WAV y muestra una textura 2D.
+//! El dibujo 3D, los modelos y las cámaras se calculan fuera de raylib.
 use crate::math::Vec3;
 use crate::raster::Framebuffer;
 use crate::ship::Input;
 use raylib::prelude::*;
+use raylib::core::audio::{Music, RaylibAudio, Sound};
+
+/// Audio 2D del juego. Raylib sigue concentrado en este módulo de plataforma.
+pub struct AudioDevice(RaylibAudio);
+pub struct GameAudio<'a> {
+    menu: Option<Music<'a>>,
+    game: Option<Music<'a>>,
+    shot: Option<Sound<'a>>,
+    hit: Option<Sound<'a>>,
+    pickup: Option<Sound<'a>>,
+    victory: Option<Sound<'a>>,
+}
+impl AudioDevice {
+    pub fn init() -> Option<Self> { RaylibAudio::init_audio_device().ok().map(Self) }
+    pub fn load(&self) -> GameAudio<'_> {
+        let menu = self.0.new_music("assets/audio/main_theme.wav").ok();
+        let game = self.0.new_music("assets/audio/asault_theme.wav").ok();
+        let shot = self.0.new_sound("assets/audio/shot.wav").ok();
+        let hit = self.0.new_sound("assets/audio/damage_static.wav").ok();
+        let pickup = self.0.new_sound("assets/audio/pickup_item.wav").ok();
+        let victory = self.0.new_sound("assets/audio/victory_endgame.wav").ok();
+        if let Some(s) = &menu { s.set_volume(0.13); }
+        if let Some(s) = &game { s.set_volume(0.13); }
+        if let Some(s) = &shot { s.set_volume(0.38); }
+        if let Some(s) = &hit { s.set_volume(0.48); }
+        if let Some(s) = &pickup { s.set_volume(0.65); }
+        if let Some(s) = &victory { s.set_volume(0.75); }
+        GameAudio { menu, game, shot, hit, pickup, victory }
+    }
+}
+impl GameAudio<'_> {
+    pub fn menu(&self) { if let Some(s) = &self.game { s.stop_stream(); } if let Some(s) = &self.menu { s.play_stream(); } }
+    pub fn game(&self) { if let Some(s) = &self.menu { s.stop_stream(); } if let Some(s) = &self.game { s.play_stream(); } }
+    pub fn update(&self) { if let Some(s) = &self.menu { if s.is_stream_playing() { s.update_stream(); } } if let Some(s) = &self.game { if s.is_stream_playing() { s.update_stream(); } } }
+    pub fn shot(&self) { if let Some(s) = &self.shot { s.play(); } }
+    pub fn hit(&self) { if let Some(s) = &self.hit { s.play(); } }
+    pub fn pickup(&self) { if let Some(s) = &self.pickup { s.play(); } }
+    pub fn victory(&self) { if let Some(m) = &self.game { m.stop_stream(); } if let Some(s) = &self.victory { s.play(); } }
+}
 
 /// Estado de entrada de un cuadro.
 #[derive(Default)]
@@ -14,7 +53,6 @@ pub struct UiInput {
     pub mouse: (f32, f32),
     pub mouse_clicked: bool,
     /// Teclas de un solo disparo en este cuadro.
-    pub toggle_tour: bool,   // T
     pub toggle_help: bool,   // F1
     pub toggle_stats: bool,  // F3
     pub toggle_culling: bool, // F4
@@ -205,7 +243,6 @@ impl Platform {
             ship: map_keys(&keys),
             mouse: window_to_fb((mp.x, mp.y), win, (self.fb_w as f32, self.fb_h as f32)),
             mouse_clicked: rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT),
-            toggle_tour: rl.is_key_pressed(KEY_T),
             toggle_help: rl.is_key_pressed(KEY_F1),
             toggle_stats: rl.is_key_pressed(KEY_F3),
             toggle_culling: rl.is_key_pressed(KEY_F4),
@@ -363,7 +400,7 @@ mod tests {
             let inp = p.poll();
             fb.clear([10, 20, 40]);
             let st = crate::hud::HudState {
-                mode: "CRUCERO", nearest_body: "VERDALIA", altitude_m: 1234.0, speed_ms: 5.0, tour_active: false,
+                mode: "CRUCERO", nearest_body: "VERDALIA", altitude_m: 1234.0, speed_ms: 5.0, tour_active: false, spectator: false, tour_available: true,
                 tour_status: "", show_stats: true, show_help: false, stats: &stats, fps: 60.0,
                 terrain: &terrain, scatter: &scatter, scale: 1.0, scale_auto: false,
                 culling_on: true, lod_on: true, land_active: false,

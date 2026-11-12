@@ -41,7 +41,7 @@ Limitación de `lab6`: los vértices se proyectan con un único `focal = size` y
 | Aterrizaje frustrante o inestable | Difícil mostrar el logro | Asistencia de frenado, horizonte estabilizado, umbrales generosos, Tour que aterriza solo |
 | Desfase de marcos de referencia al cambiar de modo | Saltos de cámara | Mezcla de 1.5 s; las pruebas comprueban que posición y velocidad en mundo son continuas en la transición |
 | Múltiples características sin tiempo | Puntos no obtenidos | Recorte por prioridad (abajo) |
-| Modelos "no propios" | Puntos de superficie no válidos | Modelar en Blender o modificar sustancialmente; guardar `.blend` fuente en el repo |
+| Modelos "no propios" | Puntos de superficie no válidos | Conservar el generador propio en Rust y los `.obj` que produce |
 | Autoría: no poder explicar el código | Pérdida de puntos | Cada persona documenta su módulo; ensayo de cambios en vivo |
 
 ## Orden de recorte si falta tiempo
@@ -64,5 +64,5 @@ Resueltas: trabajo individual, Tour con botón y animación de aterrizaje, sin r
 
 Pendientes:
 - Fecha de entrega (define hasta qué capa P0/P1/P2 se llega).
-- Riesgo nuevo por trabajo individual: el modelado en Blender compite en tiempo con el código. Mitigación: assets P0 primero, estilo low-poly facetado y presupuesto de triángulos fijo (`07`).
+- Riesgo nuevo por trabajo individual: el modelado compite en tiempo con el código. Mitigación: assets P0 primero, estilo facetado y presupuesto de triángulos fijo (`07`).
 - Opcional: bitácora de planetas visitados (estilo No Man's Sky), sin impacto en puntos.

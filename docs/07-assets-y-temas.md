@@ -4,9 +4,9 @@ Inspiración: **Star Wars, Marvel, Jurassic Park y Dune**. Es inspiración de am
 
 Reglas:
 
-- Todo modelo se hace desde cero en Blender (o se parte de una primitiva y se esculpe). Nada de descargar modelos de las franquicias.
+- Los modelos del juego se generan desde cero con vectores y triángulos en `src/bin/generate_assets.rs`. Nada de descargar modelos de las franquicias.
 - Nombres propios dentro del proyecto (Dunara, Nublar, Egrin...), referencias en el README como "inspirado en".
-- Se guardan los `.blend` fuente en `assets/src/` y los `.obj` exportados en `assets/models/`.
+- El código fuente está en `src/bin/generate_assets.rs` y los `.obj` generados en `assets/models/`.
 - Si se usa generación asistida o librerías de assets, se declara (lo pide el enunciado) y se modifica de forma sustancial.
 
 ## Sistema de 8 planetas
@@ -107,15 +107,13 @@ Para suelo "con vegetación" sin explotar triángulos: **hierba en cruces** de 2
 
 ## Flujo de trabajo de assets (en solitario)
 
-Se usa Blender (hay servidor MCP de Blender disponible para automatizar y previsualizar).
+Los modelos actuales se generan con `cargo run --bin generate_assets`.
 
-1. **Blockout** con primitivas y proporciones en metros.
-2. **Detalle facetado** (sin subdivisión suave), limpieza de normales y triángulos.
-3. **Colores de vértice** (o materiales planos) siguiendo la paleta del planeta.
-4. **LOD bajo**: decimación manual o `Decimate` y verificación visual.
-5. **Exportar** `.obj` (triangulado, +Y arriba, escala en metros) a `assets/models/`.
-6. **Prueba**: abrirlo en el visor (`--viewmodel archivo.obj`) con iluminación; chequear tamaño y orientación.
-7. **Registrar** en `assets/manifest.toml` (id, archivo, LOD, origen, planetas).
+1. Definir anillos, cajas y puntas con coordenadas en metros.
+2. Formar los triángulos, orientar sus caras hacia afuera y calcular las normales.
+3. Asignar color a cada vértice y escribir los grupos del `.obj`.
+4. Generar el LOD de la nave en el mismo programa; los LOD simplificados de objetos se construyen en `src/scatter/models.rs`.
+5. Ejecutar `cargo run --bin generate_assets` y revisar la nave con `--shot-ship` y los objetos con `--surface-shot`.
 
 Variación sin modelos extra: escala 0.8 a 1.3, giro aleatorio y pequeñas inclinaciones por instancia; un tipo sigue contando como uno solo.
 

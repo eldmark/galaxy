@@ -231,7 +231,7 @@ impl Sim {
     pub fn start_tour(&mut self) {
         self.autopilot.start(&self.ship, &self.bodies, self.t);
     }
-    /// Alterna el Tour (tecla T / botón).
+    /// Alterna el Tour en simulaciones y pruebas; la interfaz elige el modo en la portada.
     pub fn toggle_tour(&mut self) {
         if self.autopilot.active {
             self.autopilot.stop();

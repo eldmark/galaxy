@@ -8,7 +8,7 @@ Orden pensado para que **cada hito deje el programa ejecutable** y para cumplir 
 |---|---|---|---|
 | **M0** Proyecto base | `cargo new`, dependencias, `platform.rs`, bucle con reloj real, captura PNG | Ventana negra a 60 FPS; `--shot` genera PNG sin ventana | - |
 | **M1** Pipeline 3D | `Mat4`, cámara, proyección, z-buffer `1/z`, OBJ con normales, esfera iluminada | Esfera girando con perspectiva correcta y sin artefactos de profundidad; test de matrices | requisito |
-| **M2** Sistema mínimo | Sol, Verdalia con órbita y rotación por tiempo, nave en Blender, shader de Verdalia, estrellas | La órbita avanza igual a distinto FPS (`--time-scale`); shader propio visible | requisito, 10-20 |
+| **M2** Sistema mínimo | Sol, Verdalia con órbita y rotación por tiempo, nave generada en Rust, shader de Verdalia, estrellas | La órbita avanza igual a distinto FPS; shader propio visible | requisito, 10-20 |
 | **M3** Nave y vuelo | Física a paso fijo, controles, cámara con mirada libre | Respuesta idéntica con `--fps-cap 20` y `144`; acercarse y alejarse libremente | 8 aceleración |
 | **M4** Rendimiento base | Tiles + rayon, sombreado diferido, frustum culling, contadores | ≥30 FPS en 960x540; HUD muestra conteos; **cumple todos los requisitos eliminatorios** | 7 culling |
 | **M5** Cuerpos y LOD lejano | Los 5 planetas + luna, icosfera subdividida con niveles | Se distinguen a simple vista; LOD de icosfera con contadores | 50 planetas, 10 subdivisión |

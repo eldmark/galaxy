@@ -1,14 +1,14 @@
 # 09. Estado del proyecto
 
-Actualizado el 11/11/2026. Entrega: 20/11/2026.
+Actualizado el 12/11/2026. Entrega: 20/11/2026.
 
 ## Lo que ya funciona
 
 Galaxy dibuja el sistema en CPU con matrices propias, recorte, z-buffer 1/w, tiles paralelos y sombreado diferido. Raylib solo aparece en `src/platform.rs` para la ventana, las entradas y la textura final. Hay un sol y cinco planetas con posición orbital y rotación calculadas a partir del tiempo de simulación. Los shaders de los cuerpos están en `src/shading/`.
 
-La nave usa física a paso fijo de 1/120 s, gravedad, colisión contra el relieve y modos de crucero, órbita, descenso y posada. Puede viajar con las teclas `1`-`6`, seguir el Tour con `T`, aterrizar de forma asistida con `L` y reaparecer con `K` o `Supr`. El sol tiene zona letal y hay muerte por impacto a más de 120 m/s. La mirada libre usa el botón derecho y `M` activa el timoneo con el ratón.
+La nave usa física a paso fijo de 1/120 s, gravedad, colisión contra el relieve y modos de crucero, órbita, descenso y posada. En el menú se elige Juego o Tour de observación y se muestra el tutorial correspondiente. En Juego se puede viajar con las teclas `1`-`6`, aterrizar de forma asistida con `L` y reaparecer con `K` o `Supr`. El sol tiene zona letal y hay muerte por impacto a más de 120 m/s. La mirada libre usa el botón derecho y `M` activa el timoneo con el ratón.
 
-El modo pirata abre con una portada. `B` inicia un descenso asistido y baja al jugador cuando la nave se posa; `WASD` mueve al pirata y `E` recoge el tesoro cercano. Los cinco planetas son aterrizables, incluido Siroco sobre una capa de nubes jugable. Las patrullas persiguen y disparan; `Espacio` dispara desde la nave o a pie. `Shift` da más velocidad en órbita y descenso, y un agujero negro atrae y destruye la nave en el borde del sistema. Estas mecánicas están en `src/pirates.rs`.
+En Juego, `B` inicia un descenso asistido y baja al jugador cuando la nave se posa; junto a ella permite abordar y otra pulsación inicia un despegue asistido. `WASD` mueve al pirata y `E` recoge el trofeo cercano. Los cinco planetas son aterrizables, incluido Siroco sobre una capa de nubes jugable. El HUD muestra el avance de 0/5 a 5/5 y al reunirlos aparece la pantalla de victoria, desde donde se puede reiniciar con `Enter`. Hay tres modelos propios de patrulla: exploradora, interceptora y pesada, con distinta vida, velocidad y cadencia. El límite simultáneo sube de dos a cinco conforme avanza la partida. Las patrullas persiguen y disparan incluso cerca de la superficie. El radar indica su posición relativa y una mirilla central marca la dirección del disparo. `Espacio` dispara desde la nave o a pie. `Shift` da más velocidad en órbita y descenso, y un agujero negro atrae y destruye la nave en el borde del sistema. El tutorial se puede consultar y el juego se pausa con `F1`. El Tour omite combate y trofeos. Estas mecánicas están en `src/pirates.rs` y `src/app.rs`.
 
 Cerca del suelo se dibuja terreno cube-sphere por chunks y quadtree (`src/terrain/`). Los objetos de `src/scatter/` se reparten con una semilla reproducible, se orientan según la normal del relieve y comparten la transformación del planeta. El mapa de normales se alterna con `N`. Hay atmósfera, líneas de órbita con `O` y tren de aterrizaje animado.
 
@@ -18,7 +18,7 @@ Para repartir el costo de la entrada al terreno se preparan hasta dos chunks por
 
 ## Verificación
 
-- `cargo test`: 188 pruebas pasan y 4 se ignoran en el proyecto.
+- `cargo test`: 194 pruebas pasan y 4 se ignoran en el proyecto (192 del juego y 2 del generador de modelos).
 - El benchmark completo de 6300 cuadros de `main` alcanzó 13.88 ms medios y 53.15 ms de pico con culling, LOD y 16 hilos; la ejecución se interrumpió antes de imprimir la segunda configuración. En esta rama, con escala 1.0, fueron 12.47 ms medios y 45.94 ms de pico. Sin culling ni LOD, esta rama dio 14.15 ms medios y 57.67 ms de pico. La etapa de selección del quadtree estuvo en 0.19 ms durante el pico de esa última configuración gracias a la caché geométrica.
 - En 600 cuadros, con culling y LOD, la escala 0.7 bajó la media de 15.25 a 6.33 ms con 16 hilos, de 23.45 a 12.28 ms con cuatro y de 42.80 a 23.13 ms con dos. La tabla completa está en el README. Ese tramo no recorre todo el descenso y no sirve para afirmar un pico del Tour completo.
 - En dos hilos y escala 0.55 la media de esos 600 cuadros fue 19.38 ms. Con cuatro hilos y escala 0.85 fue 22.76 ms. El controlador evita volver a una escala que acaba de superar el umbral alto hasta que haya margen suficiente.

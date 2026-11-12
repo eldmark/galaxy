@@ -2,6 +2,7 @@
 name = "galaxy"
 version = "0.1.0"
 edition = "2024"
+default-run = "galaxy"
 
 [dependencies]
 raylib = "5.5.1"
