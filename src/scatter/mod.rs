@@ -2,7 +2,7 @@
 //!
 //! Rúbrica que cubre este módulo:
 //! - **Tipos de modelo propio sobre un planeta** (5 pts por tipo): `ModelId::{Tree, Obsidian, Ice, Building}`
-//!   (OBJ hechos con `assets/src/make_props.py`), uno por planeta según `species::species_for`.
+//!   (OBJ hechos con `cargo run --bin generate_assets`), uno por planeta según `species::species_for`.
 //! - **Distribución procedural reproducible** (10 pts): `place.rs`. Cada celda de scatter (un chunk de nivel 8) usa
 //!   `rng = hash(semilla, cuerpo, cara, nivel, x, y)`, una rejilla con jitter y ruido fbm de valor para agrupar
 //!   (bosques, racimos). La semilla global se fija con `--seed N` (`set_global_seed`, por defecto 1).

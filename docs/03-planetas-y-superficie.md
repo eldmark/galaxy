@@ -88,7 +88,7 @@ pub trait PlanetShader: Sync { fn shade(&self, f: &FragIn) -> Rgb; }
 
 ### Modelos (4 tipos propios)
 
-Se modelan en Blender, se exportan a `assets/models/*.obj` y cada uno lleva 2 niveles de detalle (alto/bajo):
+Se generan en Rust (`src/bin/generate_assets.rs`) como `assets/models/*.obj`; el LOD simplificado se construye en `src/scatter/models.rs`:
 
 | Tipo | Planeta | Notas |
 |---|---|---|

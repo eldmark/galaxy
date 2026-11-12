@@ -1,6 +1,6 @@
 # Nave del jugador "Tordo" (ship.obj / ship_low.obj)
 
-Modelada por nosotros con script paramétrico (`assets/src/make_ship.py` + `meshlib.py`), sin Blender.
+Modelada por nosotros con el generador paramétrico en Rust (`src/bin/generate_assets.rs`), sin Blender.
 Unidades: metros. Avance = -Z (morro), +Y arriba, +X derecha. Origen ~ centro de masa.
 Formato: `v x y z r g b`, `vn` por cara, grupos `o`, triángulos antihorarios.
 Largo 12.2 m (z -5.9..6.3), envergadura 13.8 m. Con tren desplegado y: -3.3..2.2.
@@ -35,6 +35,4 @@ la pata en Y respecto al pivote. Punto de contacto con el suelo desplegada: y = 
 | obsidian.obj | 168 | 5 m alto (spire, shard) |
 | ice_crystal.obj | 144 | 4 m alto |
 
-Regenerar: `python3 assets/src/make_ship.py`, `python3 assets/src/make_props.py`;
-validar: `python3 assets/src/validate.py`; vista previa:
-`python3 assets/src/preview.py assets/models/ship.obj assets/models/ship_preview.png ship`.
+Regenerar los nueve modelos: `cargo run --bin generate_assets`. El generador comprueba que las caras tengan área y sus pruebas verifican los grupos del tren. Para ver la nave con el renderizador del juego: `cargo run --release -- --shot-ship screenshots/nave.png`.

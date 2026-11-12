@@ -63,6 +63,8 @@ impl Rig {
             altitude_m: crate::world::altitude(nb.position(sim.t), nb.radius, sim.ship.position),
             speed_ms: (sim.ship.velocity - nb.velocity(sim.t)).length(),
             tour_active: false,
+            spectator: false,
+            tour_available: true,
             tour_status: "",
             show_stats: false,
             show_help: false,

@@ -33,7 +33,7 @@ fn paint_sky(fb: &mut Framebuffer, view: Mat4, time: f32) {
 }
 
 /// Vista del sistema: sol y planetas en fila con su LOD y shader reales.
-pub fn system(out: &Path, time: f32, stats_out: bool) -> std::io::Result<()> {
+pub fn system_frame(time: f32) -> (Framebuffer, Stats) {
     let bodies = solar_system();
     let lods = SphereLods::new(5, &|_| 0.0);
     let shaders: Vec<_> = bodies.iter().map(|b| shader_for(b.kind)).collect();
@@ -84,6 +84,11 @@ pub fn system(out: &Path, time: f32, stats_out: bool) -> std::io::Result<()> {
     }
     let mut stats = Stats::default();
     render_scene(&mut fb, view, proj, &calls, &RenderOptions::default(), &mut stats);
+    (fb, stats)
+}
+
+pub fn system(out: &Path, time: f32, stats_out: bool) -> std::io::Result<()> {
+    let (fb, stats) = system_frame(time);
     fb.save_png(out)?;
     if stats_out {
         println!("{stats:#?}");

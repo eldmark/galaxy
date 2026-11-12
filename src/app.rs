@@ -3,7 +3,7 @@ use crate::geometry::{Mesh, SphereLods, ring_mesh};
 use crate::shipmodel::ShipModel;
 use crate::terrain::{ChunkKey, Frustum, Terrain};
 use std::sync::Arc;
-use crate::hud::{HudLayout, HudState, draw_hud_layout};
+use crate::hud::{HudLayout, HudState, MenuPage, draw_hud_layout};
 use crate::math::{DVec3, Mat4, Vec3};
 use crate::platform::Platform;
 use crate::pirates::PirateGame;
@@ -321,6 +321,8 @@ fn hud_state<'a>(sim: &'a Sim, stats: &'a Stats, scene: &'a Scene, fps: f32, sho
         altitude_m: altitude(nb.position(sim.t), nb.radius, sim.ship.position),
         speed_ms: if sim.ship.mode == crate::ship::NavMode::Landed { 0.0 } else { speed_relative(sim, near) },
         tour_active: sim.autopilot.active && sim.autopilot.tour,
+        spectator: false,
+        tour_available: true,
         tour_status: if sim.autopilot.active { sim.autopilot.status() } else { "" },
         show_stats,
         show_help,
@@ -365,7 +367,12 @@ pub fn record(dir: &str, frames: u32, every: u32) {
 }
 
 pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum PlayMode { Game, Tour }
     let mut platform = Platform::new(WIDTH, HEIGHT, "Galaxy | renderizador por software");
+    let audio_device = crate::platform::AudioDevice::init();
+    let audio = audio_device.as_ref().map(|device| device.load());
+    if let Some(a) = &audio { a.menu(); }
     let mut scene = Scene::new();
     let mut sim = new_sim();
     let mut cam = CameraRig::new();
@@ -385,24 +392,55 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
     let menu_background = if start_tour {
         None
     } else {
-        let mut stats = Stats::default();
-        scene.render(&mut world_fb, &sim, &cam, &RenderOptions::default(), true, &mut stats);
-        upscale(&world_fb, &mut fb);
-        Some(fb.color.clone())
+        Some(crate::shot::system_frame(5.0).0.color)
     };
     let mut started = start_tour;
+    let mut menu_page = MenuPage::Select;
+    let mut play_mode = if start_tour { PlayMode::Tour } else { PlayMode::Game };
     if start_tour {
         sim.start_tour();
     }
     while !platform.should_close() {
         let input = platform.poll();
+        if let Some(a) = &audio { a.update(); }
         if input.quit {
             break;
         }
         if !started {
-            if input.start_game || input.mouse_clicked { started = true; continue; }
             fb.color.copy_from_slice(menu_background.as_ref().unwrap());
-            crate::hud::draw_start_screen(&mut fb);
+            let menu = crate::hud::draw_start_screen(&mut fb, menu_page, input.mouse);
+            if input.toggle_board { menu_page = MenuPage::Select; }
+            else if menu_page == MenuPage::Select {
+                if input.select_body == Some(1) || (input.mouse_clicked && menu.tour.contains(input.mouse.0, input.mouse.1)) {
+                    menu_page = MenuPage::TourTutorial;
+                } else if input.start_game || input.select_body == Some(0) || (input.mouse_clicked && menu.game.contains(input.mouse.0, input.mouse.1)) {
+                    menu_page = MenuPage::GameTutorial;
+                }
+            } else if input.start_game || (input.mouse_clicked && menu.continue_button.contains(input.mouse.0, input.mouse.1)) {
+                play_mode = if menu_page == MenuPage::TourTutorial { PlayMode::Tour } else { PlayMode::Game };
+                if play_mode == PlayMode::Tour { sim.start_tour(); }
+                if play_mode == PlayMode::Game { if let Some(a) = &audio { a.game(); } }
+                started = true;
+            }
+            platform.present(&fb);
+            continue;
+        }
+        if play_mode == PlayMode::Game && pirates.won(&sim) {
+            if input.start_game {
+                sim = new_sim();
+                cam.snap(&sim.ship);
+                fx = crate::fx::FlightFx::new();
+                pirates = PirateGame::new(sim.bodies.len());
+                resolution = Resolution::new(fixed_scale);
+                show_stats = false;
+                show_help = false;
+                opts = RenderOptions::default();
+                lod_on = true;
+                fps = 60.0;
+                layout = None;
+                if let Some(a) = &audio { a.game(); }
+                continue;
+            }
             platform.present(&fb);
             continue;
         }
@@ -424,36 +462,46 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         if input.toggle_assist {
             sim.ship.flight_assist = !sim.ship.flight_assist;
         }
-        if input.toggle_tour && !pirates.on_foot() {
-            sim.toggle_tour();
-        }
-        if input.land_auto && !pirates.on_foot() {
+        if !show_help && input.land_auto && play_mode == PlayMode::Game && !pirates.on_foot() {
             sim.land_here();
         }
-        pirates.handle_board(&mut sim, &mut cam, input.toggle_board);
-        if let Some(i) = input.select_body.filter(|_| !pirates.on_foot()) {
+        if play_mode == PlayMode::Game && !show_help { pirates.handle_board(&mut sim, &mut cam, input.toggle_board); }
+        if let Some(i) = input.select_body.filter(|_| play_mode == PlayMode::Game && !show_help && !pirates.on_foot()) {
             sim.go_to(i);
         }
-        if input.mouse_clicked && !pirates.on_foot() {
+        if input.mouse_clicked && play_mode == PlayMode::Game && !show_help && !pirates.on_foot() {
             if let Some(l) = &layout {
-                if l.tour.contains(input.mouse.0, input.mouse.1) {
-                    sim.toggle_tour();
-                } else if l.land.contains(input.mouse.0, input.mouse.1) {
+                if l.land.contains(input.mouse.0, input.mouse.1) {
                     sim.land_here();
                 }
             }
         }
-        let dt = platform.frame_time().clamp(0.0, 0.1);
+        let dt = if show_help { 0.0 } else { platform.frame_time().clamp(0.0, 0.1) };
         let old_ship_pos = sim.ship.position;
         let idle_input = Input::default();
-        sim.frame(dt, if pirates.on_foot() { &idle_input } else { &input.ship });
-        if pirates.on_foot() {
-            cam.update_foot(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.ship.rotate);
-        } else {
-            cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
+        let mut ship_input = input.ship;
+        if play_mode == PlayMode::Game { pirates.apply_takeoff_input(&mut ship_input); }
+        sim.frame(dt, if show_help || play_mode == PlayMode::Tour || pirates.on_foot() { &idle_input } else { &ship_input });
+        if !show_help {
+            if pirates.on_foot() {
+                cam.update_foot(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.ship.rotate);
+            } else {
+                cam.update(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.free_look);
+            }
+            fx.update(&mut sim, &mut cam, dt, input.toggle_orbits, input.respawn);
         }
-        fx.update(&mut sim, &mut cam, dt, input.toggle_orbits, input.respawn);
-        pirates.update(&mut sim, &mut cam, &input.ship, input.collect, input.fire, dt, old_ship_pos);
+        if play_mode == PlayMode::Game && !show_help {
+            let shots_before = pirates.shots_fired;
+            let loot_before = pirates.loot;
+            let hull_before = sim.hull;
+            pirates.update(&mut sim, &mut cam, &input.ship, input.collect, input.fire, dt, old_ship_pos);
+            if let Some(a) = &audio {
+                if pirates.shots_fired > shots_before { a.shot(); }
+                if sim.hull < hull_before { a.hit(); }
+                if pirates.loot > loot_before { a.pickup(); }
+                if pirates.won(&sim) && loot_before < pirates.goal(&sim) { a.victory(); }
+            }
+        }
         if dt > 1e-4 {
             fps += ((1.0 / dt as f32) - fps) * 0.1;
         }
@@ -463,17 +511,24 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         let mut stats = Stats::default();
         let render_start = Instant::now();
         scene.render(&mut world_fb, &sim, &cam, &opts, lod_on, &mut stats);
-        pirates.draw_world(&mut world_fb, &sim, &cam, &mut stats);
+        if play_mode == PlayMode::Game { pirates.draw_world(&mut world_fb, &sim, &cam, &mut stats); }
         fx.draw_world(&mut world_fb, &sim, &cam);
         upscale(&world_fb, &mut fb);
 
-        let state = hud_state(&sim, &stats, &scene, fps, show_stats, show_help, &opts, lod_on, resolution.scale(), resolution.automatic);
+        let mut state = hud_state(&sim, &stats, &scene, fps, show_stats, show_help, &opts, lod_on, resolution.scale(), resolution.automatic);
+        state.spectator = play_mode == PlayMode::Tour;
+        state.tour_available = false;
         layout = Some(draw_hud_layout(&mut fb, &state, input.mouse));
-        if sim.autopilot.active {
+        if sim.autopilot.active && !show_help {
             crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
         }
-        fx.draw_hud(&mut fb, &sim);
-        pirates.draw_hud(&mut fb, &sim);
+        if !show_help { fx.draw_hud(&mut fb, &sim); }
+        if play_mode == PlayMode::Game && !show_help {
+            pirates.draw_hud(&mut fb, &sim, &cam);
+            if pirates.won(&sim) { pirates.draw_victory(&mut fb, &sim); }
+        } else if play_mode == PlayMode::Tour && !show_help {
+            crate::hud::draw_text_shadow(&mut fb, 16, HEIGHT as i32 - 49, "TOUR DE OBSERVACION: SIN COMBATE", [130, 224, 255], 1);
+        }
 
         if input.screenshot {
             let _ = std::fs::create_dir_all("screenshots");
@@ -490,15 +545,9 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
 }
 
 /// Captura la portada sin abrir una ventana, útil para revisar su composición.
-pub fn menu_shot(path: &Path) -> std::io::Result<()> {
-    let mut scene = Scene::new();
-    let sim = new_sim();
-    let mut cam = CameraRig::new();
-    cam.snap(&sim.ship);
-    let mut fb = Framebuffer::new(WIDTH, HEIGHT);
-    let mut stats = Stats::default();
-    scene.render(&mut fb, &sim, &cam, &RenderOptions::default(), true, &mut stats);
-    crate::hud::draw_start_screen(&mut fb);
+pub fn menu_shot(path: &Path, page: MenuPage) -> std::io::Result<()> {
+    let mut fb = crate::shot::system_frame(5.0).0;
+    crate::hud::draw_start_screen(&mut fb, page, (-1.0, -1.0));
     fb.save_png(path)
 }
 

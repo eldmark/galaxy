@@ -1,6 +1,6 @@
 # Galaxy: sistema solar explorable con renderizador por software
 
-Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Es un juego de piratas espaciales en un sistema solar pequeño: se buscan tesoros en los planetas, se combate contra patrullas de policía y se evita un agujero negro en el borde. La nave conserva inercia, gravedad y colisión, y el Tour automático viaja de planeta en planeta, orbita, desciende y aterriza. Todo el dibujo se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib solo abre la ventana, lee el teclado y el ratón y muestra el framebuffer como una textura 2D.
+Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Al abrirlo se elige entre jugar y ver el Tour automático. En el juego hay que reunir cinco trofeos, uno por planeta, mientras se combate contra patrullas y se evita el agujero negro del borde. El Tour recorre el sistema sin combate. Todo el dibujo 3D se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib abre la ventana, lee las entradas, presenta el framebuffer como una textura 2D y reproduce los sonidos.
 
 ![Sistema solar](screenshots/sistema.png)
 
@@ -10,8 +10,8 @@ Necesitas Rust (edición 2024, cargo reciente), CMake y un compilador de C, porq
 
 ```bash
 cargo test                       # pruebas unitarias y de integración
-cargo run --release              # portada y juego interactivo 960x540
-cargo run --release -- --tour    # igual, pero con el Tour automático ya iniciado
+cargo run --release              # portada: elegir juego o Tour, 960x540
+cargo run --release -- --tour    # Tour de observación sin pasar por la portada
 ```
 
 Siempre ejecuta desde la raíz del repositorio: el programa carga `assets/models/ship.obj` con una ruta relativa. Usa `--release`; en modo debug el sombreado por CPU es demasiado lento.
@@ -24,7 +24,7 @@ Opciones de línea de comandos (las que imprime `--help`):
 | `--bench [--frames N]` | Recorre el Tour sin ventana con y sin culling/LOD y compara tiempos y triángulos (N=3000 por defecto) |
 | `--record DIR [--frames N] [--every K]` | Guarda en `DIR` un PNG cada K cuadros del Tour (N=1800 y K=60 por defecto), sin ventana |
 | `--shot out.png [--time T] [--stats]` | Vista del sistema en un PNG (`--stats` imprime los contadores) |
-| `--menu-shot out.png` | Captura la portada en PNG sin abrir la ventana |
+| `--menu-shot out.png [--tutorial game|tour]` | Captura la portada o una pantalla de tutorial sin abrir la ventana |
 | `--shot-ship out.png [--gear G]` | Vista de la nave en un PNG; G va de 0 (tren plegado) a 1 (desplegado) |
 | `--surface-shot out.png --body verdalia --alt 40 [--seed N]` | Vista de la superficie; `--body siroco` muestra la capa de nubes |
 | `--atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]` | Vista de atmósfera y comparación del mapa de normales |
@@ -50,12 +50,13 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 
 | Tecla | Acción |
 |---|---|
-| `Enter` / `Espacio` | Iniciar la partida desde la portada |
+| `1` / `2` en la portada | Elegir juego o Tour de observación; también se puede hacer clic |
+| `Enter` / `Espacio` | Continuar desde la pantalla de tutorial elegida |
 | `W` / `S` | Adelante / atrás |
 | `A` / `D` | Lateral izquierda / derecha |
 | `Q` / `E` | Abajo / arriba en la nave |
-| `E` | Recoger un tesoro cuando se está a pie y cerca de él |
-| `B` | Solicitar descenso y bajar de la nave; cerca de ella, volver a abordar |
+| `E` | Recoger un trofeo cuando se está a pie y cerca de él |
+| `B` | Bajar, abordar cerca de la nave y volver a pulsar para despegar con ayuda |
 | `Espacio` | Disparar desde la nave o a pie |
 | Flechas | Cabeceo y guiñada |
 | `Z` / `C` | Alabeo |
@@ -64,9 +65,8 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `Shift` / `Ctrl` | Turbo / freno en la nave; `Shift` permite correr a pie |
 | `G` | Gravedad encendida / apagada |
 | `X` | Asistencia de vuelo encendida / apagada |
-| `T` o clic en el botón del HUD | Iniciar / detener el Tour automático |
 | `L` o botón `ATERRIZAR AUTO` | Aterrizaje automático (solo si la nave está en ORBITA o DESCENSO sobre un planeta aterrizable) |
-| `F1` | Ayuda con la tabla de controles |
+| `F1` | Ayuda con la tabla de controles; pausa el juego mientras está abierta |
 | `F3` | Panel de estadísticas del pipeline |
 | `F4` | Frustum culling de las llamadas del rasterizador encendido / apagado |
 | `F5` | LOD encendido / apagado |
@@ -78,11 +78,11 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `P` | Captura PNG en `screenshots/vista-N.png` |
 | `Esc` | Salir |
 
-Cualquier mando del jugador interrumpe el Tour y devuelve el control sin saltos. En tierra, `WASD` mueve al pirata, las flechas giran la vista y el botón derecho permite mirar con el ratón.
+El Tour de observación no tiene combate, trofeos ni controles de vuelo. En el juego, `WASD` mueve al pirata en tierra, las flechas giran la vista y el botón derecho permite mirar con el ratón. La mirilla central indica la dirección del disparo y el radar inferior izquierdo marca a las patrullas cercanas respecto de la vista.
 
 En crucero no hay un tope de velocidad de juego: el turbo aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Cerca del suelo, el turbo permite superar 2 m/s con mayor facilidad sin perder el control local; al soltarlo vuelve el límite de velocidad de descenso.
 
-En órbita o descenso sobre un planeta, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Los cinco planetas admiten aterrizaje; en Siroco se camina sobre una capa de nubes jugable. Cada planeta tiene un tesoro y el HUD indica su distancia. Las patrullas aparecen cerca de los planetas y persiguen al jugador, también a pie. Cada patrulla resiste dos impactos. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
+En órbita o descenso sobre un planeta, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Después de recoger el trofeo, `B` permite abordar cerca de la nave; otra pulsación inicia un ascenso asistido, y `W` ayuda a alejarse. Los cinco planetas admiten aterrizaje; en Siroco se camina sobre una capa de nubes jugable. El HUD muestra cuántos trofeos faltan y al reunir los cinco termina la partida; `Enter` inicia otra. Hay tres naves policiales: exploradora rápida (un impacto), interceptora (dos) y pesada (tres). Al recoger trofeos sube el máximo de patrullas simultáneas de dos a cinco. Se acercan al relieve, disparan en la superficie y también pueden atacar una nave posada. El radar indica dónde están. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
 
 Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 
@@ -114,8 +114,8 @@ El panel `F3` muestra también las hojas y triángulos del terreno, los objetos 
 
 | Requisito | Dónde se ve o se verifica |
 |---|---|
-| Pipeline de software propio; raylib solo ventana, entrada y mostrar el framebuffer | Solo `src/platform.rs` usa raylib (ventana, teclado, ratón, `update_texture` y `draw_texture_pro`). `src/hud.rs` escribe en el framebuffer a mano. No se usa `draw_model`, `Camera3D`, shaders GLSL ni física de raylib |
-| Sol, nave modelada por nosotros y al menos un planeta | Sol Ígnea y cinco planetas en `world::solar_system`. La nave `assets/models/ship.obj` se genera con `assets/src/make_ship.py`; ver `screenshots/nave.png` (`cargo run --release -- --shot-ship nave.png`) |
+| Pipeline de software propio; raylib para ventana, entrada, audio y mostrar el framebuffer | Solo `src/platform.rs` usa raylib (ventana, teclado, ratón, WAV, `update_texture` y `draw_texture_pro`). `src/hud.rs` escribe en el framebuffer a mano. No se usa `draw_model`, `Camera3D`, shaders GLSL ni física de raylib |
+| Sol, nave modelada por nosotros y al menos un planeta | Sol Ígnea y cinco planetas en `world::solar_system`. La nave `assets/models/ship.obj` se genera con `cargo run --bin generate_assets`; ver `screenshots/nave.png` (`cargo run --release -- --shot-ship nave.png`) |
 | Nave controlable | `src/ship/physics.rs` (`step`); probar con `W/A/S/D/Q/E`, flechas, `Shift` y `Ctrl` |
 | Planetas que orbitan y rotan según el tiempo transcurrido, no los cuadros | `Body::position(t)` y `Body::rotation_angle(t)` en `src/world/mod.rs` son funciones puras del tiempo; la prueba `orbit_is_periodic_and_stateless` lo verifica. El tiempo `sim.t` avanza en múltiplos exactos de 1/120 s (`src/ship/stepper.rs`); la prueba `fixed_step_is_frame_rate_independent` simula con distintos FPS y obtiene la misma posición |
 | Acercarse y alejarse sin pantalla de carga | Un solo mundo y un solo bucle (`app::run`); el LOD cambia de malla en caliente con histéresis. Se ve en el Tour o volando hacia Verdalia |
@@ -212,10 +212,11 @@ En 6300 cuadros con 16 hilos, culling y LOD, la escala 1.0 dio 12.47 ms medios y
 ## Recursos externos y asistencia de IA
 
 - **Asistencia de IA.** Este proyecto se desarrolló con Claude Code (Anthropic), usando varios agentes que generaron código y documentación bajo mi dirección: yo definí el alcance, la arquitectura y las decisiones, y los agentes escribieron buena parte de las implementaciones, pruebas y scripts. Revisé el resultado y puedo explicarlo, pero declaro que una gran parte del código fue generada con IA.
-- **Dependencias.** Solo `raylib` 5.5 (ventana, entrada y textura 2D) y `rayon` 1 (paralelismo por tiles).
+- **Dependencias.** Solo `raylib` 5.5 (ventana, entrada, textura 2D y audio) y `rayon` 1 (paralelismo por tiles).
+- **Audio.** `main_theme.wav` suena en la portada y el Tour; `asault_theme.wav` durante el Juego. Hay efectos para disparos, daño, trofeos y victoria. Los archivos están en `assets/audio/`.
 - **Shaders.** Adaptados del laboratorio de la materia `lab6` (Atlas de mundos): Ígnea, Verdalia, Siroco, Mutante, Nix y Fornax, portados a este pipeline.
 - **Pipeline.** El lector de OBJ y la idea del rasterizado baricéntrico con z-buffer vienen del laboratorio `cargar-modelo`; aquí se reescribieron con tiles, punto fijo y sombreado diferido.
-- **Modelos.** La nave y cuatro objetos de superficie (árbol, obsidiana, cristal de hielo y edificio) salen de scripts en `assets/src/` (`make_ship.py`, `make_props.py`, `meshlib.py`), sin modelos descargados. Detalles en `assets/models/ship.md`.
+- **Modelos.** La nave, tres naves policiales y cuatro objetos de superficie (árbol, obsidiana, cristal de hielo y edificio) se construyen con vectores y triángulos en `src/bin/generate_assets.rs`, sin modelos descargados. Para regenerar todos los `.obj`, ejecutar `cargo run --bin generate_assets`. El juego carga esos archivos con `src/geometry/obj.rs`; detalles de la nave del jugador en `assets/models/ship.md`.
 - No se usan texturas ni imágenes externas en la escena; el color sale de shaders procedurales y de los colores de vértice de los modelos.
 
 ## Integrantes y contribuciones

@@ -45,11 +45,11 @@ fn main() {
     let time: f32 = arg_value(&args, "--time").and_then(|t| t.parse().ok()).unwrap_or(5.0);
     if has("--help") {
         println!(
-            "galaxy [--tour]                 ventana interactiva (--tour inicia el piloto automático)\n\
+            "galaxy [--tour]                 portada de Juego y Tour (--tour abre el Tour de observación)\n\
              galaxy --bench [--frames N] [--scale S]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
-             galaxy --menu-shot out.png      captura la portada sin ventana\n\
+             galaxy --menu-shot out.png [--tutorial game|tour]   captura portada o tutorial sin ventana\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
              galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
              galaxy [--seed N] [--scale S]   semilla y escala interna fija (1, 0.85, 0.7, 0.55); F6 alterna auto/100%\n\
@@ -77,7 +77,12 @@ fn main() {
         return;
     }
     if let Some(out) = arg_value(&args, "--menu-shot") {
-        app::menu_shot(Path::new(&out)).expect("no se pudo guardar la portada");
+        let page = match arg_value(&args, "--tutorial").as_deref() {
+            Some("game") => hud::MenuPage::GameTutorial,
+            Some("tour") => hud::MenuPage::TourTutorial,
+            _ => hud::MenuPage::Select,
+        };
+        app::menu_shot(Path::new(&out), page).expect("no se pudo guardar la portada");
         return;
     }
     if let Some(out) = arg_value(&args, "--atmos-shot") {

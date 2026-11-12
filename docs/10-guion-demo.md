@@ -1,6 +1,6 @@
 # 10. Guion para la demostración
 
-La portada se abre con `cargo run --release`; `Enter` inicia el juego. `--tour` omite la portada para ir directo al recorrido automático. Conviene tener `F3` abierto y el proyecto ya compilado. Reserva unos siete minutos para mostrar las partes de la rúbrica y deja los cambios de código para el final.
+La portada se abre con `cargo run --release`; `1` elige Juego y `2` elige Tour de observación. Cada modo muestra un tutorial antes de comenzar. `--tour` omite la portada para ir directo al recorrido automático. Conviene tener `F3` abierto y el proyecto ya compilado. Reserva unos siete minutos para mostrar las partes de la rúbrica y deja los cambios de código para el final.
 
 | Tiempo | Qué mostrar | Qué explicar |
 |---|---|---|
@@ -11,10 +11,10 @@ La portada se abre con `cargo run --release`; `Enter` inicia el juego. `--tour` 
 | 3:00 | Objetos con `--seed 1` y `--seed 7`, o una vista de `--surface-shot` | Árboles, espiras, cristales y edificios se colocan de forma reproducible. Se orientan con la normal del relieve y giran junto con el planeta. |
 | 3:45 | `F3`, alternar `F4` y `F5` | `F4` cambia el descarte por frustum. `F5` cambia el detalle de esferas, terreno, objetos y shaders. Comparar triángulos, hojas e instancias en el panel. |
 | 4:45 | `W`, `Shift`, `Ctrl`, `G`, `X` | La nave acelera de forma progresiva con simulación a paso fijo. `G` cambia la gravedad y `X` la asistencia. |
-| 5:30 | `L` y aterrizaje; después `T` | La nave puede bajar, posar el tren y despegar. El Tour une viaje, órbita y aterrizaje. |
+| 5:30 | `L` y aterrizaje; luego `B` al volver a la nave | La nave puede bajar, posar el tren y despegar con ayuda. Para mostrar el Tour, reinicia y elige `2` en la portada. |
 | 6:15 | `F6` y `F3` | La escala interna baja si el tiempo de cuadro se mantiene alto, y el HUD conserva la resolución nativa. Mostrar el benchmark medido en el README. |
 
-Para mostrar el juego pirata después del Tour, toma el control cerca de Verdalia, pulsa `B` para bajar, camina hacia el tesoro indicado en el HUD y recógelo con `E`. Las patrullas se acercan; apunta con el botón derecho o las flechas y dispara con `Espacio`. `Shift` acelera en vuelo local y permite correr a pie. Muestra el agujero negro solo si queda tiempo: se activa al alejarse hacia el borde del sistema.
+Para mostrar el juego pirata, elige Juego en la portada. Cerca de Verdalia, pulsa `B` para bajar, camina hacia el trofeo indicado en el HUD y recógelo con `E`. El contador cambia a 1/5. Cada planeta tiene uno y, al juntar los cinco, aparece la pantalla de victoria. Las patrullas se acercan en tres modelos distintos, incluso en el planeta, y el número máximo aumenta con los trofeos. Enseña la mirilla y el radar; apunta con el botón derecho o las flechas y dispara con `Espacio`. Muestra el tutorial de controles con `F1`. `Shift` acelera en vuelo local y permite correr a pie. Muestra el agujero negro solo si queda tiempo: se activa al alejarse hacia el borde del sistema.
 
 ## Cambio sencillo en vivo
 

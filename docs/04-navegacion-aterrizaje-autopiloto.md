@@ -70,12 +70,12 @@ a_i = G·M_i / (r² + ε²)   dirigida al centro del cuerpo i, solo si r < r_inf
 
 ## AUTOPILOTO
 
-Un solo modo: el **Tour**. Se inicia con un **botón en el HUD** (clic de ratón o tecla `T`) y se detiene con otro clic, con `T` o con cualquier entrada de mando. Es una máquina de estados que alimenta los mismos controles del jugador (comparte física, colisión y límites). **En el suelo no hay recorrido automático**: una vez posada, la nave solo responde al jugador.
+El **Tour de observación** se elige en la portada, después de ver su tutorial. La nave viaja, orbita y aterriza sola. Es una máquina de estados que alimenta los mismos controles de vuelo y comparte física, colisión y límites. No hay combate ni trofeos en este modo. El Juego es la otra opción de la portada y permite aterrizar automáticamente con `L`.
 
-### Botón
+### Portada
 
-- Botón dibujado por nosotros en el framebuffer (`hud.rs`) con estados reposo/hover/activo; el ratón solo da la posición y el clic.
-- Texto: `TOUR AUTOMATICO [T]`. Al activarse muestra destino, fase y ETA, y el botón pasa a `DETENER`.
+- Los botones de Juego y Tour los dibuja `hud.rs` en el framebuffer; el ratón solo entrega la posición y el clic.
+- Al elegir Tour se muestra su tutorial y luego el HUD indica destino, fase y ETA.
 - Botón secundario `ATERRIZAR AUTO`: si la nave está en ORBITA o DESCENSO sobre un planeta aterrizable, ejecuta solo la secuencia de descenso y posada del planeta actual.
 
 ### Animación de aterrizaje
@@ -137,9 +137,9 @@ El enunciado exige poder orientar la nave y ver el entorno durante el acercamien
 | Shift / Ctrl | Boost / freno |
 | `G` | Gravedad asistida sí/no |
 | `X` | Asistencia de vuelo sí/no |
-| `T` o clic en el botón | Iniciar/detener el Tour automático |
+| `1`/`2` en la portada | Elegir Juego o Tour de observación |
 | `L` o botón `ATERRIZAR AUTO` | Aterrizaje automático en el planeta actual |
-| `Espacio` | Despegar (si está posada) |
+| `B` | Bajar tras aterrizar, abordar cerca de la nave y despegar con ayuda |
 | `1`-`6` | Viaje automático al cuerpo (1 = sol): alinear, tránsito, aproximar y una vuelta de órbita |
 | `F1` ayuda, `F3` estadísticas, `F4` culling, `F5` LOD, `N` normal map |
 | `P` | Captura PNG |

@@ -243,6 +243,8 @@ pub struct HudState<'a> {
     pub altitude_m: f64,
     pub speed_ms: f64,
     pub tour_active: bool,
+    pub spectator: bool,
+    pub tour_available: bool,
     pub tour_status: &'a str,
     pub show_stats: bool,
     pub show_help: bool,
@@ -293,26 +295,55 @@ fn panel(fb: &mut Framebuffer, r: Rect) {
     stroke_rect(fb, r, COL_BORDER, 200);
 }
 
-/// Portada del modo pirata. Se compone sobre una vista estática del sistema.
-pub fn draw_start_screen(fb: &mut Framebuffer) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MenuPage { Select, GameTutorial, TourTutorial }
+
+pub struct MenuLayout { pub game: Rect, pub tour: Rect, pub continue_button: Rect }
+
+/// Portada y tutoriales sobre una captura del sistema renderizada por el propio juego.
+pub fn draw_start_screen(fb: &mut Framebuffer, page: MenuPage, mouse: (f32, f32)) -> MenuLayout {
     let w = fb.width as i32;
     let h = fb.height as i32;
-    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [1, 5, 15], 185);
+    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [1, 5, 15], 145);
     let pw = 640.min(w - 20);
-    let ph = 322.min(h - 20);
+    let ph = 350.min(h - 20);
     let r = Rect { x: (w - pw) / 2, y: (h - ph) / 2, w: pw, h: ph };
     panel(fb, r);
     let center = |fb: &mut Framebuffer, text: &str, y: i32, scale: i32, color| {
         draw_text_shadow(fb, (w - text_width(text, scale)) / 2, y, text, color, scale);
     };
-    center(fb, "PIRATAS DE LA GALAXIA", r.y + 30, 3, COL_ACCENT);
-    center(fb, "BUSCA TESOROS. HUYE DE LA POLICIA.", r.y + 83, 2, COL_TEXT);
-    center(fb, "ATERRIZA, EXPLORA Y VUELVE A TU NAVE", r.y + 115, 2, COL_TEXT);
-    center(fb, "WASD VOLAR/CAMINAR   SHIFT TURBO", r.y + 142, 2, COL_DIM);
-    center(fb, "B BAJAR/ABORDAR   E TESORO   ESPACIO DISPARAR", r.y + 168, 2, COL_DIM);
-    let button = Rect { x: w / 2 - 152, y: r.y + 211, w: 304, h: 42 };
-    draw_button(fb, button, "INICIAR [ENTER]", false, true);
-    center(fb, "ESC PARA SALIR", r.y + 276, 1, COL_DIM);
+    let game = Rect { x: w / 2 - 180, y: r.y + 147, w: 360, h: 42 };
+    let tour = Rect { x: w / 2 - 180, y: r.y + 204, w: 360, h: 42 };
+    let continue_button = Rect { x: w / 2 - 180, y: r.y + 264, w: 360, h: 42 };
+    match page {
+        MenuPage::Select => {
+            center(fb, "PIRATAS DE LA GALAXIA", r.y + 27, 3, COL_ACCENT);
+            center(fb, "UN SISTEMA PARA EXPLORAR", r.y + 83, 2, COL_TEXT);
+            draw_button(fb, game, "JUGAR: 5 TROFEOS [1]", game.contains(mouse.0, mouse.1), false);
+            draw_button(fb, tour, "TOUR: SOLO VER [2]", tour.contains(mouse.0, mouse.1), false);
+            center(fb, "ELIGE UN MODO PARA VER SUS CONTROLES", r.y + 277, 1, COL_DIM);
+        }
+        MenuPage::GameTutorial => {
+            center(fb, "COMO JUGAR", r.y + 22, 3, COL_ACCENT);
+            center(fb, "REUNE UN TROFEO EN CADA PLANETA: 0/5", r.y + 75, 2, COL_TEXT);
+            center(fb, "WASD VOLAR/CAMINAR  SHIFT TURBO", r.y + 111, 2, COL_TEXT);
+            center(fb, "L ATERRIZAR  B BAJAR/ABORDAR", r.y + 138, 2, COL_TEXT);
+            center(fb, "TRAS ABORDAR, B DESPEGA", r.y + 165, 2, COL_TEXT);
+            center(fb, "E TROFEO  ESPACIO DISPARAR", r.y + 192, 2, COL_TEXT);
+            center(fb, "MIRILLA AL CENTRO  RADAR A LA IZQUIERDA", r.y + 219, 1, COL_TEXT);
+            draw_button(fb, continue_button, "EMPEZAR JUEGO [ENTER]", continue_button.contains(mouse.0, mouse.1), true);
+        }
+        MenuPage::TourTutorial => {
+            center(fb, "TOUR AUTOMATICO", r.y + 22, 3, COL_ACCENT);
+            center(fb, "RECORRIDO PARA OBSERVAR EL SISTEMA", r.y + 83, 2, COL_TEXT);
+            center(fb, "LA NAVE VIAJA, ORBITA Y ATERRIZA SOLA", r.y + 132, 2, COL_TEXT);
+            center(fb, "SIN COMBATE NI TROFEOS", r.y + 166, 2, COL_TEXT);
+            center(fb, "F1 CONTROLES   F3 DATOS   ESC SALIR", r.y + 204, 1, COL_TEXT);
+            draw_button(fb, continue_button, "INICIAR TOUR [ENTER]", continue_button.contains(mouse.0, mouse.1), true);
+        }
+    }
+    center(fb, if page == MenuPage::Select { "ESC PARA SALIR" } else { "B VOLVER AL MENU   ESC SALIR" }, r.y + 322, 1, COL_DIM);
+    MenuLayout { game, tour, continue_button }
 }
 
 /// Dibuja el HUD completo y devuelve el rectángulo del botón del Tour (para detectar clics).
@@ -361,15 +392,17 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
     let bw = text_width("CANCELAR ATERRIZAJE [L]", 2) + 24;
     let bh = 28;
     let gap = 12;
-    let total = bw * 2 + gap;
+    let total = if state.tour_available { bw * 2 + gap } else { bw };
     let by = h - bh - 12;
     let bx = (w - total) / 2;
     let tour = Rect { x: bx, y: by, w: bw, h: bh };
-    let land = Rect { x: bx + bw + gap, y: by, w: bw, h: bh };
+    let land = Rect { x: if state.tour_available { bx + bw + gap } else { bx }, y: by, w: bw, h: bh };
     let tl = if state.tour_active { "DETENER TOUR [T]" } else { "TOUR AUTOMATICO [T]" };
     let ll = if state.land_active { "CANCELAR ATERRIZAJE [L]" } else { "ATERRIZAR AUTO [L]" };
-    draw_button(fb, tour, tl, tour.contains(mouse.0, mouse.1), state.tour_active);
-    draw_button(fb, land, ll, land.contains(mouse.0, mouse.1), state.land_active);
+    if !state.spectator {
+        if state.tour_available { draw_button(fb, tour, tl, tour.contains(mouse.0, mouse.1), state.tour_active); }
+        draw_button(fb, land, ll, land.contains(mouse.0, mouse.1), state.land_active);
+    }
 
     if state.tour_active || state.land_active {
         let st = if state.tour_status.is_empty() { "EN CURSO" } else { state.tour_status };
@@ -385,7 +418,9 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
     if state.show_help {
         draw_help(fb);
     }
-    HudLayout { tour, land }
+    if state.spectator {
+        HudLayout { tour: Rect { x: 0, y: 0, w: 0, h: 0 }, land: Rect { x: 0, y: 0, w: 0, h: 0 } }
+    } else { HudLayout { tour: if state.tour_available { tour } else { Rect { x: 0, y: 0, w: 0, h: 0 } }, land } }
 }
 
 /// Formatea un tiempo restante: "42 S", "1:05 MIN".
@@ -450,7 +485,7 @@ fn draw_stats_panel(fb: &mut Framebuffer, state: &HudState) {
 }
 
 /// Tabla de controles mostrada en la pantalla de ayuda.
-pub const HELP_ROWS: [(&str, &str); 25] = [
+pub const HELP_ROWS: [(&str, &str); 24] = [
     ("W / S", "Adelante / atras"),
     ("A / D", "Lateral izquierda / derecha"),
     ("Q / E", "Abajo / arriba"),
@@ -460,12 +495,11 @@ pub const HELP_ROWS: [(&str, &str); 25] = [
     ("M / BTN MED", "Raton timonea on/off"),
     ("SHIFT", "Boost"),
     ("ESPACIO", "Disparar a la policia"),
-    ("B", "Bajar / abordar nave"),
-    ("E A PIE", "Recoger tesoro cercano"),
+    ("B", "Bajar / abordar / despegar"),
+    ("E A PIE", "Recoger trofeo cercano"),
     ("CTRL", "Freno"),
     ("G", "Gravedad on/off"),
     ("X", "Asistencia de vuelo on/off"),
-    ("T", "Tour automatico"),
     ("L", "Aterrizar automatico"),
     ("1 - 6", "Viajar al cuerpo (1=sol)"),
     ("O", "Lineas de orbita on/off"),
@@ -647,6 +681,8 @@ mod tests {
             altitude_m: 12_345.0,
             speed_ms: 1500.0,
             tour_active: false,
+            spectator: false,
+            tour_available: true,
             tour_status: "",
             show_stats: true,
             show_help: false,
