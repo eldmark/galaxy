@@ -165,9 +165,16 @@ pub fn window_to_fb(pos: (f32, f32), win: (f32, f32), fb: (f32, f32)) -> (f32, f
 
 // ------------------------------------------------------------------ ventana raylib
 
+/// Alto (px) de la barra de estado que va DEBAJO del framebuffer, dentro de la ventana pero fuera de la imagen
+/// renderizada: aquí se muestran los FPS medidos, de modo que no quedan dibujados en el mundo ni en un video.
+pub const STATUS_BAR_H: usize = 22;
+
 pub struct Platform {
-    // Orden de campos = orden de drop: la textura debe liberarse antes de cerrar la ventana.
+    // Orden de campos = orden de drop: las texturas deben liberarse antes de cerrar la ventana.
     texture: Texture2D,
+    bar_texture: Texture2D,
+    /// Buffer propio de la barra de estado (se dibuja con la fuente de `hud.rs`, sin funciones de texto de raylib).
+    bar: Framebuffer,
     rl: RaylibHandle,
     thread: RaylibThread,
     fb_w: usize,
@@ -180,7 +187,7 @@ pub struct Platform {
 impl Platform {
     pub fn new(fb_width: usize, fb_height: usize, title: &str) -> Self {
         let (mut rl, thread) = raylib::init()
-            .size(fb_width as i32, fb_height as i32)
+            .size(fb_width as i32, (fb_height + STATUS_BAR_H) as i32)
             .title(title)
             .resizable()
             .build();
@@ -189,11 +196,33 @@ impl Platform {
         rl.set_window_min_size(320, 180);
         let image = Image::gen_image_color(fb_width as i32, fb_height as i32, Color::BLACK);
         let texture = rl.load_texture_from_image(&thread, &image).expect("no se pudo crear la textura");
-        Self { rl, thread, texture, fb_w: fb_width, fb_h: fb_height, frame_time: 1.0 / 60.0, mouse_steer: false }
+        let bar_image = Image::gen_image_color(fb_width as i32, STATUS_BAR_H as i32, Color::BLACK);
+        let bar_texture = rl.load_texture_from_image(&thread, &bar_image).expect("no se pudo crear la textura de la barra");
+        Self { rl, thread, texture, bar_texture, bar: Framebuffer::new(fb_width, STATUS_BAR_H), fb_w: fb_width, fb_h: fb_height, frame_time: 1.0 / 60.0, mouse_steer: false }
     }
 
     pub fn should_close(&self) -> bool {
         self.rl.window_should_close()
+    }
+
+    /// Durante la pausa el cursor debe quedar libre para poder pulsar los botones, aunque el timoneo con el
+    /// ratón (`M`) lo tuviera capturado; al reanudar se restablece según `mouse_steer`.
+    pub fn set_menu_cursor(&mut self, menu: bool) {
+        if menu {
+            self.rl.enable_cursor();
+        } else if self.mouse_steer {
+            self.rl.disable_cursor();
+        }
+    }
+
+    /// Texto de la barra de estado (fuera del framebuffer). `ok` lo pinta en verde; si no, en ámbar.
+    /// La fuente solo tiene mayúsculas, dígitos y signos básicos (sin `|` ni `~`).
+    pub fn set_status(&mut self, text: &str, ok: bool) {
+        let (w, h) = (self.bar.width as i32, self.bar.height as i32);
+        crate::hud::fill_rect(&mut self.bar, crate::hud::Rect { x: 0, y: 0, w, h }, [8, 14, 26], 255);
+        crate::hud::fill_rect(&mut self.bar, crate::hud::Rect { x: 0, y: 0, w, h: 1 }, [64, 104, 156], 255);
+        let color = if ok { [120, 235, 190] } else { [255, 196, 110] };
+        crate::hud::draw_text(&mut self.bar, 10, 4, text, color, 2);
     }
 
     /// Segundos reales del último cuadro.
@@ -237,7 +266,8 @@ impl Platform {
             mouse_delta: (md.x, md.y),
         };
         let mp = rl.get_mouse_position();
-        let win = (rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        // El área del juego es la ventana menos la barra de estado de abajo.
+        let win = (rl.get_screen_width() as f32, (rl.get_screen_height() as f32 - STATUS_BAR_H as f32).max(1.0));
         let digits = [KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX];
         UiInput {
             ship: map_keys(&keys),
@@ -274,15 +304,26 @@ impl Platform {
             return;
         }
         let _ = self.texture.update_texture(&fb.color);
+        let _ = self.bar_texture.update_texture(&self.bar.color);
         let win_w = self.rl.get_screen_width() as f32;
         let win_h = self.rl.get_screen_height() as f32;
-        let (x, y, w, h) = letterbox(win_w, win_h, self.fb_w as f32, self.fb_h as f32);
+        let bar_h = STATUS_BAR_H as f32;
+        let (x, y, w, h) = letterbox(win_w, (win_h - bar_h).max(1.0), self.fb_w as f32, self.fb_h as f32);
         let mut d = self.rl.begin_drawing(&self.thread);
         d.clear_background(Color::BLACK);
         d.draw_texture_pro(
             &self.texture,
             Rectangle::new(0.0, 0.0, self.fb_w as f32, self.fb_h as f32),
             Rectangle::new(x, y, w, h),
+            Vector2::new(0.0, 0.0),
+            0.0,
+            Color::WHITE,
+        );
+        // Barra de estado pegada abajo, a tamaño nativo (el resto del ancho queda negro).
+        d.draw_texture_pro(
+            &self.bar_texture,
+            Rectangle::new(0.0, 0.0, self.bar.width as f32, self.bar.height as f32),
+            Rectangle::new(0.0, win_h - bar_h, self.bar.width as f32, bar_h),
             Vector2::new(0.0, 0.0),
             0.0,
             Color::WHITE,

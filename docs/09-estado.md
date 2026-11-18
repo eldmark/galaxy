@@ -32,3 +32,23 @@ En el mismo Tour de 6300 cuadros a 16 hilos y escala 0.7 se midieron 8.01 ms med
 ## Pendiente antes de entregar
 
 Hay que probar manualmente los controles en la ventana real y grabar el video final. El integrante debe completar `[NOMBRE]`, la contribución y el enlace del video en el README. La luna de Verdalia y los planetas Dunara, Nublar y Egrin siguen como ampliaciones posibles. Las capturas del Tour y el ajuste visual del polvo y la explosión del sol necesitan una última revisión humana.
+
+## Actualización 18/11: pausa y rendimiento en suelo
+
+- **Pausa (`Esc`)**: congela la simulación y el combate, muestra la tabla de controles y los botones `CONTINUAR` y `SALIR DEL JUEGO` (`hud::draw_pause`, bucle en `app::run`). En la portada y en la pantalla de victoria `Esc` sale del programa. `--pause-shot out.png` la captura sin ventana.
+- **Etapa de vértices en paralelo por llamada de dibujo** (`raster/pipeline.rs`): el terreno llega como cientos de mallas pequeñas y antes todo el trabajo caía en un hilo. Tour completo de 13.2 a ~10.8 ms por cuadro; el resultado sigue siendo idéntico con 1 y con 16 hilos.
+- **Shaders más baratos sin cambiar la imagen** (`src/shading/`: ruido, cachés de esquinas, poda exacta de `cell_surface`, mapa de normales): sombreado a 40 m -40 % en Fornax, -30 % en Verdalia, -25 % en Nix, -20 % en Mutante. Diferencia de imagen de 0/255 de media.
+- **Escala dinámica apunta a 60 FPS** (`resolution.rs`): baja con más de 16 ms sostenidos (de dos en dos niveles si pasa de 28 ms) y sube con holgura.
+- **Bancos nuevos**: `--bench` imprime una línea solo con los cuadros de suelo; `--surface-shot ... --bench-ground [--scale S]` mide el cuadro a ras de suelo por planeta.
+
+Tiempo por cuadro a 40 m de altitud, 16 hilos, 960x540 (la máquina estaba compartida, hay ruido de unos ±10 %):
+
+| Planeta | Escala 100 % | Escala 70 % | Escala 55 % |
+|---|---|---|---|
+| Verdalia | 25.4 ms | 14.9 ms | 12.6 ms |
+| Fornax | 43.6 ms | 24.0 ms | 15.2 ms |
+| Nix | 18.8 ms | 10.0 ms | 7.1 ms |
+| Mutante | 17.6 ms | 8.4 ms | 5.7 ms |
+| Siroco | 12.1 ms | 7.2 ms | 4.5 ms |
+
+Con la escala automática todos entran en 16.7 ms; Fornax es el más pesado y necesita llegar al 55 %. A 100 % solo Siroco cumple.

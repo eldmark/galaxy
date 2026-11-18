@@ -4,6 +4,18 @@ use rayon::prelude::*;
 
 pub const SCALES: [f32; 4] = [1.0, 0.85, 0.7, 0.55];
 
+// Objetivo: 60 FPS (16.7 ms por cuadro, medido de dibujar el mundo y el HUD, sin la espera del vsync).
+/// Si el promedio supera esto durante `SLOW_DWELL_S`, se baja un nivel de escala.
+const SLOW_MS: f32 = 16.0;
+const SLOW_DWELL_S: f32 = 0.4;
+/// Por encima de esto se baja de dos en dos para llegar rápido a una escala jugable.
+const VERY_SLOW_MS: f32 = 28.0;
+/// Para subir de nivel hace falta holgura sostenida: subir cuesta ~1.4x píxeles, así que 11.5 ms deja ~16 ms.
+const FAST_MS: f32 = 11.5;
+const FAST_DWELL_S: f32 = 2.0;
+/// Justo después de bajar, solo se vuelve a subir con más holgura aún (evita oscilar entre dos niveles).
+const FAST_AFTER_DROP_MS: f32 = 9.5;
+
 pub struct Resolution {
     pub index: usize,
     pub automatic: bool,
@@ -33,14 +45,16 @@ impl Resolution {
         if !self.automatic || !ms.is_finite() { return; }
         let dt = dt.clamp(0.0, 0.1);
         self.avg_ms += (ms - self.avg_ms) * (dt / 0.5).clamp(0.0, 1.0);
-        self.slow_s = if self.avg_ms > 22.0 { self.slow_s + dt } else { 0.0 };
-        self.fast_s = if self.avg_ms < 13.0 { self.fast_s + dt } else { 0.0 };
-        if self.slow_s >= 0.5 && self.index + 1 < SCALES.len() {
-            self.index += 1;
+        self.slow_s = if self.avg_ms > SLOW_MS { self.slow_s + dt } else { 0.0 };
+        self.fast_s = if self.avg_ms < FAST_MS { self.fast_s + dt } else { 0.0 };
+        if self.slow_s >= SLOW_DWELL_S && self.index + 1 < SCALES.len() {
+            // Muy por encima del objetivo (p. ej. Fornax a ras de suelo, ~40 ms): baja dos niveles de una vez.
+            let steps = if self.avg_ms > VERY_SLOW_MS { 2 } else { 1 };
+            self.index = (self.index + steps).min(SCALES.len() - 1);
             self.blocked_up_index = Some(self.index);
             self.slow_s = 0.0;
             self.fast_s = 0.0;
-        } else if self.fast_s >= 2.0 && self.index > 0 && (self.blocked_up_index != Some(self.index) || self.avg_ms < 10.5) {
+        } else if self.fast_s >= FAST_DWELL_S && self.index > 0 && (self.blocked_up_index != Some(self.index) || self.avg_ms < FAST_AFTER_DROP_MS) {
             self.index -= 1;
             self.blocked_up_index = None;
             self.fast_s = 0.0;
@@ -96,6 +110,22 @@ mod tests {
         assert_eq!(&dst.color[0..4], &[0, 0, 0, 255]);
         assert_eq!(&dst.color[4..8], &[100, 50, 25, 255]);
         assert_eq!(&dst.color[8..12], &[200, 100, 50, 255]);
+    }
+    #[test]
+    fn targets_sixty_fps() {
+        // 18 ms (55 FPS) sostenidos ya obligan a bajar la escala; 14 ms (71 FPS) no.
+        let mut slow = Resolution::new(None);
+        for _ in 0..90 { slow.update(18.0, 1.0 / 60.0); }
+        assert!(slow.index > 0, "a 55 FPS debería bajar la escala");
+        let mut ok = Resolution::new(None);
+        for _ in 0..600 { ok.update(14.0, 1.0 / 60.0); }
+        assert_eq!(ok.index, 0, "a 71 FPS no hace falta bajar");
+    }
+    #[test]
+    fn very_slow_frames_drop_two_levels_at_once() {
+        let mut r = Resolution::new(None);
+        for _ in 0..60 { r.update(45.0, 1.0 / 60.0); }
+        assert!(r.index >= 2, "con 45 ms sostenidos debe llegar al menos al nivel 2 en 1 s (índice {})", r.index);
     }
     #[test]
     fn hysteresis() {

@@ -11,7 +11,28 @@ const WALK_SPEED: f64 = 13.0;
 const SPRINT_SPEED: f64 = 26.0;
 const BOARD_DISTANCE: f64 = 45.0;
 const TREASURE_DISTANCE: f64 = 8.0;
-const MAX_POLICE: usize = 5;
+const MAX_POLICE: usize = 8;
+const REQUIRED_DEFEATS: u32 = 4;
+const POLICE_DECISION_SECONDS: f64 = 1.0;
+const SHOT_SPEED: f64 = 800.0;
+
+// SplitMix64: estado propio por partida, reproducible en pruebas y sin dependencia extra.
+struct Random(u64);
+impl Random {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        z ^ (z >> 31)
+    }
+    fn one_in(&mut self, n: u64) -> bool {
+        // Rechazo para que cada resultado tenga exactamente la misma probabilidad.
+        let threshold = n.wrapping_neg() % n;
+        loop { let x = self.next(); if x >= threshold { return x % n == 0; } }
+    }
+    fn unit(&mut self) -> f64 { (self.next() >> 11) as f64 / (1u64 << 53) as f64 }
+}
 const BOUNDARY_WARN: f64 = 125_000.0;
 const BOUNDARY_END: f64 = 165_000.0;
 
@@ -20,7 +41,7 @@ struct Foot { body: usize, local: DVec3 }
 #[derive(Clone, Copy)]
 struct Treasure { local: DVec3, collected: bool }
 #[derive(Clone, Copy)]
-struct Police { pos: DVec3, vel: DVec3, hp: u8, cooldown: f64, kind: PoliceKind }
+struct Police { pos: DVec3, vel: DVec3, hp: u8, cooldown: f64, kind: PoliceKind, decision_wait: f64, approaching: bool, strafe: f64 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PoliceKind { Scout, Interceptor, Heavy }
 impl PoliceKind {
@@ -28,10 +49,10 @@ impl PoliceKind {
     fn hp(self) -> u8 { match self { Self::Scout => 1, Self::Interceptor => 2, Self::Heavy => 3 } }
     fn speed(self) -> f64 { match self { Self::Scout => 330.0, Self::Interceptor => 280.0, Self::Heavy => 220.0 } }
     fn cooldown(self) -> f64 { match self { Self::Scout => 2.1, Self::Interceptor => 1.55, Self::Heavy => 1.25 } }
-    fn damage(self) -> f64 { match self { Self::Scout => 0.14, Self::Interceptor => 0.20, Self::Heavy => 0.26 } }
+    fn damage(self) -> f64 { match self { Self::Scout => 0.08, Self::Interceptor => 0.11, Self::Heavy => 0.15 } }
     fn scale(self) -> f32 { match self { Self::Scout => 1.15, Self::Interceptor => 1.45, Self::Heavy => 1.9 } }
 }
-fn police_limit(loot: u32) -> usize { (2 + loot as usize).min(MAX_POLICE) }
+fn police_limit(loot: u32) -> usize { (4 + loot as usize).min(MAX_POLICE) }
 #[derive(Clone, Copy)]
 struct Shot { pos: DVec3, vel: DVec3, ttl: f64, player: bool, damage: f64 }
 
@@ -46,6 +67,8 @@ fn push_call<'a>(calls: &mut Vec<DrawCall<'a>>, mesh: &'a Mesh, shader: &'a Colo
 }
 
 pub struct PirateGame {
+    rng: Random,
+    hit_flash: f64,
     foot: Option<Foot>,
     pending_disembark: bool,
     ready_to_takeoff: bool,
@@ -84,7 +107,9 @@ impl PirateGame {
         for v in &mut player_bullet.vertices { v.color = [0.25, 1.0, 0.88]; }
         let mut police_bullet = icosphere(0);
         for v in &mut police_bullet.vertices { v.color = [1.0, 0.18, 0.18]; }
-        Self { foot: None, pending_disembark: false, ready_to_takeoff: false, takeoff_assist: 0.0,
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64).unwrap_or(1);
+        Self { rng: Random(seed), hit_flash: 0.0, foot: None, pending_disembark: false, ready_to_takeoff: false, takeoff_assist: 0.0,
             treasures: vec![None; body_count], police: Vec::new(), shots: Vec::new(),
             police_spawn_wait: 5.0, fire_wait: 0.0, loot: 0, police_defeated: 0, shots_fired: 0, black_hole: None,
             notice: ("", 0.0), police_meshes, cube, sphere, ring, player_bullet, police_bullet, shader: ColorShader }
@@ -92,7 +117,15 @@ impl PirateGame {
 
     pub fn on_foot(&self) -> bool { self.foot.is_some() }
     pub fn goal(&self, sim: &Sim) -> u32 { sim.bodies.iter().filter(|body| body.landable).count() as u32 }
-    pub fn won(&self, sim: &Sim) -> bool { self.goal(sim) > 0 && self.loot >= self.goal(sim) }
+    pub fn won(&self, sim: &Sim) -> bool {
+        sim.is_alive() && self.goal(sim) > 0 && self.loot >= self.goal(sim) && self.police_defeated >= REQUIRED_DEFEATS
+    }
+    fn target(&self, sim: &Sim) -> DVec3 {
+        self.foot.map(|f| {
+            let b = &sim.bodies[f.body];
+            fixed_pos(b, sim.t, f.local) + b.fixed_to_world(sim.t, f.local.normalized()) * 1.5
+        }).unwrap_or(sim.ship.position)
+    }
     pub fn apply_takeoff_input(&self, input: &mut Input) {
         if self.takeoff_assist > 0.0 {
             input.thrust.y = 1.0;
@@ -168,6 +201,11 @@ impl PirateGame {
 
     pub fn update(&mut self, sim: &mut Sim, cam: &mut CameraRig, input: &Input, collect: bool, fire: bool, dt: f64, old_ship_pos: DVec3) {
         let dt = dt.clamp(0.0, 0.1);
+        let old_target = self.foot.map(|f| {
+            let b = &sim.bodies[f.body];
+            fixed_pos(b, sim.t - dt, f.local) + b.fixed_to_world(sim.t - dt, f.local.normalized()) * 1.5
+        }).unwrap_or(old_ship_pos);
+        self.hit_flash = (self.hit_flash - dt).max(0.0);
         self.notice.1 = (self.notice.1 - dt).max(0.0);
         self.fire_wait = (self.fire_wait - dt).max(0.0);
         self.police_spawn_wait = (self.police_spawn_wait - dt).max(0.0);
@@ -198,7 +236,7 @@ impl PirateGame {
                     if !treasure.collected && (world - fixed_pos(b, sim.t, treasure.local)).length() <= TREASURE_DISTANCE {
                         treasure.collected = true;
                         self.loot += 1;
-                        self.notice = if self.won(sim) { ("TODOS LOS TROFEOS", 4.0) } else { ("TROFEO ENCONTRADO", 4.0) };
+                        self.notice = if self.loot >= self.goal(sim) { ("TROFEOS COMPLETOS: ELIMINA PATRULLAS", 4.0) } else { ("TROFEO ENCONTRADO", 4.0) };
                         self.police_spawn_wait = 0.0;
                     }
                 }
@@ -218,7 +256,7 @@ impl PirateGame {
         }
         self.spawn_police(sim);
         self.update_police(sim, dt);
-        self.update_shots(sim, dt);
+        self.update_shots(sim, dt, old_target);
     }
 
     fn update_black_hole(&mut self, sim: &mut Sim, dt: f64, old_pos: DVec3) {
@@ -241,34 +279,44 @@ impl PirateGame {
 
     fn spawn_police(&mut self, sim: &Sim) {
         let limit = police_limit(self.loot);
-        if sim.autopilot.active || self.police_spawn_wait > 0.0 || self.police.len() >= limit { return; }
-        let i = nearest_body(&sim.bodies, sim.ship.position, sim.t);
-        if i == 0 || (sim.ship.position - sim.bodies[i].position(sim.t)).length() > sim.bodies[i].radius * 4.0 { return; }
+        if self.police_spawn_wait > 0.0 || self.police.len() >= limit { return; }
+        let target = self.target(sim);
+        let i = nearest_body(&sim.bodies, target, sim.t);
         let b = &sim.bodies[i];
-        let up = (sim.ship.position - b.position(sim.t)).normalized();
+        let up = (target - b.position(sim.t)).normalized();
         let side = tangent(cross(up, DVec3::new(0.0, 1.0, 0.0)), up);
         for slot in self.police.len()..limit {
             let kind = match (slot + self.loot as usize) % 3 { 0 => PoliceKind::Scout, 1 => PoliceKind::Interceptor, _ => PoliceKind::Heavy };
             let angle = slot as f64 * std::f64::consts::TAU / limit as f64;
             let other = cross(up, side).normalized();
             let lateral = side * angle.cos() + other * angle.sin();
-            self.police.push(Police { pos: sim.ship.position + up * (170.0 + slot as f64 * 24.0) + lateral * 290.0,
-                vel: b.velocity(sim.t), hp: kind.hp(), cooldown: 1.2 + slot as f64 * 0.25, kind });
+            self.police.push(Police { pos: target + up * (170.0 + slot as f64 * 24.0) + lateral * 360.0,
+                vel: b.velocity(sim.t), hp: kind.hp(), cooldown: 2.0 + slot as f64 * 0.3, kind, decision_wait: 0.0, approaching: false, strafe: if slot % 2 == 0 { 1.0 } else { -1.0 } });
         }
-        self.police_spawn_wait = (28.0 - self.loot as f64 * 3.0).max(14.0);
+        self.police_spawn_wait = (12.0 - self.loot as f64).max(7.0);
         self.notice = ("POLICIA EN EL RADAR", 3.0);
     }
 
     fn update_police(&mut self, sim: &Sim, dt: f64) {
-        if sim.autopilot.active { return; }
+        if dt <= 0.0 { return; }
         let on_foot = self.on_foot();
-        let target = self.foot.map(|f| fixed_pos(&sim.bodies[f.body], sim.t, f.local)).unwrap_or(sim.ship.position);
+        let target = self.target(sim);
         for enemy in &mut self.police {
+            enemy.decision_wait -= dt;
+            if enemy.decision_wait <= 0.0 {
+                enemy.approaching = self.rng.one_in(3);
+                enemy.decision_wait += POLICE_DECISION_SECONDS;
+            }
             let i = nearest_body(&sim.bodies, enemy.pos, sim.t);
             let b = &sim.bodies[i];
             let up = (enemy.pos - b.position(sim.t)).normalized();
-            let goal = target + up * if on_foot { 14.0 } else { 30.0 };
-            let desired = (goal - enemy.pos).normalized() * enemy.kind.speed() + b.velocity(sim.t);
+            let goal = target + up * if on_foot { 35.0 } else { 60.0 };
+            let delta = goal - enemy.pos;
+            let dir = delta.normalized();
+            let movement = if delta.length() < 120.0 { -dir * 0.55 }
+                else if enemy.approaching { dir }
+                else { tangent(cross(dir, up), dir) * (enemy.strafe * 0.65) };
+            let desired = movement * enemy.kind.speed() + b.velocity(sim.t);
             enemy.vel += (desired - enemy.vel) * (1.0 - (-dt * 2.0).exp());
             enemy.pos += enemy.vel * dt;
             let rel = enemy.pos - b.position(sim.t);
@@ -278,21 +326,43 @@ impl PirateGame {
             }
             enemy.cooldown -= dt;
             let to_target = target - enemy.pos;
-            if enemy.cooldown <= 0.0 && to_target.length() < 600.0 {
-                self.shots.push(Shot { pos: enemy.pos, vel: to_target.normalized() * 580.0, ttl: 2.0, player: false, damage: enemy.kind.damage() });
-                self.shots_fired += 1;
+            if enemy.cooldown <= 0.0 {
                 enemy.cooldown = enemy.kind.cooldown();
+                // Una oportunidad por cooldown, independiente de los FPS. La mitad dispara.
+                if to_target.length() < 1_200.0 && self.rng.one_in(2) {
+                    let accurate = !self.rng.one_in(3); // 2/3 apuntan a la posición conocida.
+                    let spread = if accurate { DVec3::ZERO } else {
+                        let angle = self.rng.unit() * std::f64::consts::TAU;
+                        let right = tangent(cross(to_target.normalized(), up), to_target.normalized());
+                        let vertical = cross(to_target.normalized(), right).normalized();
+                        (right * angle.cos() + vertical * angle.sin()) * (45.0 + self.rng.unit() * 75.0)
+                    };
+                    self.shots.push(Shot { pos: enemy.pos, vel: (to_target + spread).normalized() * SHOT_SPEED,
+                        ttl: 2.0, player: false, damage: enemy.kind.damage() });
+                    self.shots_fired += 1;
+                }
             }
         }
     }
 
-    fn update_shots(&mut self, sim: &mut Sim, dt: f64) {
+    fn update_shots(&mut self, sim: &mut Sim, dt: f64, old_target: DVec3) {
+        if dt <= 0.0 { return; }
         let on_foot = self.on_foot();
-        let target = self.foot.map(|f| fixed_pos(&sim.bodies[f.body], sim.t, f.local)).unwrap_or(sim.ship.position);
+        let target = self.target(sim);
         for shot in &mut self.shots {
             let old = shot.pos;
-            shot.pos += shot.vel * dt;
+            let travel_dt = dt.min(shot.ttl.max(0.0));
+            shot.pos += shot.vel * travel_dt;
             shot.ttl -= dt;
+            // Los planetas bloquean proyectiles antes de comprobar impactos detrás de ellos.
+            let obstruction = sim.bodies.iter().filter_map(|b| {
+                segment_sphere_entry(old, shot.pos, b.position(sim.t), b.radius * 0.98)
+            }).min_by(f64::total_cmp);
+            let target_end = old_target + (target - old_target) * (travel_dt / dt * obstruction.unwrap_or(1.0));
+            if let Some(t) = obstruction {
+                shot.pos = old + (shot.pos - old) * t;
+                shot.ttl = 0.0;
+            }
             if shot.player {
                 for enemy in &mut self.police {
                     if enemy.hp > 0 && segment_sphere_entry(old, shot.pos, enemy.pos, 26.0).is_some() {
@@ -301,8 +371,10 @@ impl PirateGame {
                         break;
                     }
                 }
-            } else if segment_sphere_entry(old, shot.pos, target, if on_foot { 3.0 } else { 12.0 }).is_some() {
+            } else if segment_sphere_entry(old - old_target, shot.pos - target_end, DVec3::ZERO, if on_foot { 3.0 } else { 12.0 }).is_some() {
                 sim.hull = (sim.hull - shot.damage).max(0.0);
+                self.hit_flash = 0.22;
+                self.notice = ("IMPACTO POLICIAL: EVASION", 1.5);
                 shot.ttl = 0.0;
                 if sim.hull <= 0.0 { sim.kill(DeathCause::Police); }
             }
@@ -350,8 +422,16 @@ impl PirateGame {
     }
 
     pub fn draw_hud(&self, fb: &mut Framebuffer, sim: &Sim, cam: &CameraRig) {
+        if self.hit_flash > 0.0 {
+            let w = fb.width as i32;
+            let h = fb.height as i32;
+            for r in [Rect { x: 0, y: 0, w, h: 7 }, Rect { x: 0, y: h - 7, w, h: 7 },
+                Rect { x: 0, y: 0, w: 7, h }, Rect { x: w - 7, y: 0, w: 7, h }] {
+                fill_rect(fb, r, [255, 35, 45], 210);
+            }
+        }
         let mode = if self.on_foot() { "A PIE" } else { "PIRATA ESPACIAL" };
-        let line = format!("{}  TROFEOS {}/{}  POLICIAS {}", mode, self.loot, self.goal(sim), self.police_defeated);
+        let line = format!("{}  TROFEOS {}/{}  BAJAS {}/{}", mode, self.loot, self.goal(sim), self.police_defeated, REQUIRED_DEFEATS);
         let x = 258;
         fill_rect(fb, Rect { x: x - 6, y: 7, w: 405, h: if self.on_foot() { 56 } else { 38 } }, [2, 8, 20], 160);
         draw_text_shadow(fb, x, 12, &line, [255, 206, 75], 1);
@@ -424,7 +504,10 @@ impl PirateGame {
 
 fn tangent(v: DVec3, up: DVec3) -> DVec3 {
     let t = v - up * v.dot(up);
-    if t.length() > 1e-6 { t.normalized() } else { cross(up, DVec3::new(0.0, 1.0, 0.0)).normalized() }
+    if t.length() > 1e-6 { t.normalized() } else {
+        let axis = if up.y.abs() < 0.9 { DVec3::new(0.0, 1.0, 0.0) } else { DVec3::new(1.0, 0.0, 0.0) };
+        cross(up, axis).normalized()
+    }
 }
 fn on_surface(body: &Body, local: DVec3) -> DVec3 {
     let dir = local.normalized();
@@ -436,6 +519,114 @@ fn fixed_pos(body: &Body, t: f64, local: DVec3) -> DVec3 { body.position(t) + bo
 mod tests {
     use super::*;
     use crate::app::new_sim;
+    fn enemy_shot(pos: DVec3, vel: DVec3, damage: f64) -> Shot {
+        Shot { pos, vel, ttl: 2.0, player: false, damage }
+    }
+
+    #[test]
+    fn random_approach_frequency_is_one_third() {
+        let mut rng = Random(71);
+        let count = (0..90_000).filter(|_| rng.one_in(3)).count();
+        assert!((29_300..30_700).contains(&count), "{count}");
+    }
+
+    #[test]
+    fn patrols_track_and_fire_in_space_even_during_autopilot() {
+        let mut sim = new_sim();
+        sim.ship.position = DVec3::new(0.0, 90_000.0, 0.0);
+        sim.autopilot.active = true;
+        let mut game = PirateGame::new(sim.bodies.len());
+        game.rng = Random(42);
+        game.police_spawn_wait = 0.0;
+        game.spawn_police(&sim);
+        assert_eq!(game.police.len(), 4);
+        for a in 0..game.police.len() {
+            for b in a + 1..game.police.len() {
+                assert!((game.police[a].pos - game.police[b].pos).length() > 100.0);
+            }
+        }
+        // Cambiar de posición después de aparecer: deben orientar los disparos al nuevo objetivo.
+        sim.ship.position.x += 40.0;
+        let mut aimed = 0;
+        let mut missed = 0;
+        for _ in 0..100 {
+            for p in &mut game.police { p.cooldown = 0.0; }
+            game.update_police(&sim, 0.001);
+            for shot in game.shots.drain(..) {
+                let alignment = shot.vel.normalized().dot((sim.ship.position - shot.pos).normalized());
+                if alignment > 0.999999 { aimed += 1; } else { missed += 1; }
+            }
+        }
+        assert!(aimed > 70 && missed > 20);
+        game.loot = 100;
+        game.police_spawn_wait = 0.0;
+        game.spawn_police(&sim);
+        assert_eq!(game.police.len(), MAX_POLICE);
+    }
+
+    #[test]
+    fn police_damage_requires_impact_and_can_kill() {
+        let mut sim = new_sim();
+        let mut game = PirateGame::new(sim.bodies.len());
+        let target = sim.ship.position;
+        let health = sim.hull;
+        game.shots.push(enemy_shot(target + DVec3::new(-50.0, 30.0, 0.0), DVec3::new(1000.0, 0.0, 0.0), 0.15));
+        game.update_shots(&mut sim, 0.1, target);
+        assert_eq!(sim.hull, health, "una bala que falla no causa daño");
+        game.shots.clear();
+        game.shots.push(enemy_shot(target + DVec3::new(-50.0, 0.0, 0.0), DVec3::new(1000.0, 0.0, 0.0), 0.15));
+        game.update_shots(&mut sim, 0.1, target);
+        assert!((sim.hull - (health - 0.15)).abs() < 1e-9);
+        assert!(game.shots.is_empty(), "el impacto consume la bala");
+        assert!(game.hit_flash > 0.0);
+        sim.hull = 0.05;
+        game.shots.push(enemy_shot(target, DVec3::ZERO, 0.15));
+        game.update_shots(&mut sim, 0.1, target);
+        assert_eq!(sim.hull, 0.0);
+        assert!(matches!(sim.status, crate::ship::ShipStatus::Dead { cause: DeathCause::Police, .. }));
+    }
+
+    #[test]
+    fn police_shots_hit_the_pirate_on_foot_away_from_ship() {
+        let mut sim = new_sim();
+        let b = &sim.bodies[2];
+        let local = on_surface(b, DVec3::new(b.radius, 0.0, 0.0));
+        let up = b.fixed_to_world(sim.t, local.normalized());
+        let mut game = PirateGame::new(sim.bodies.len());
+        game.foot = Some(Foot { body: 2, local });
+        let target = game.target(&sim);
+        assert!((target - sim.ship.position).length() > 100.0);
+        game.shots.push(enemy_shot(target + up * 50.0, up * -1000.0, 0.11));
+        game.update_shots(&mut sim, 0.1, target);
+        assert!((sim.hull - 0.89).abs() < 1e-9);
+    }
+
+    #[test]
+    fn shots_detect_player_crossing_between_frames() {
+        let mut sim = new_sim();
+        let target = sim.ship.position;
+        let old_target = target - DVec3::new(100.0, 0.0, 0.0);
+        let mut game = PirateGame::new(sim.bodies.len());
+        game.shots.push(enemy_shot(target - DVec3::new(50.0, 0.0, 0.0), DVec3::ZERO, 0.08));
+        game.update_shots(&mut sim, 0.1, old_target);
+        assert!((sim.hull - 0.92).abs() < 1e-9);
+    }
+
+    #[test]
+    fn planet_blocks_police_shots() {
+        let mut sim = new_sim();
+        let b = &sim.bodies[2];
+        let center = b.position(sim.t);
+        let r = b.radius;
+        sim.ship.position = center + DVec3::new(r * 2.0, 0.0, 0.0);
+        let target = sim.ship.position;
+        let mut game = PirateGame::new(sim.bodies.len());
+        game.shots.push(enemy_shot(center - DVec3::new(r * 2.0, 0.0, 0.0), DVec3::new(r * 40.0, 0.0, 0.0), 0.15));
+        game.update_shots(&mut sim, 0.1, target);
+        assert_eq!(sim.hull, 1.0);
+        assert!(game.shots.is_empty());
+    }
+
     #[test]
     fn treasure_stays_on_rotating_planet() {
         let sim = new_sim();
@@ -477,9 +668,10 @@ mod tests {
         let mut sim = new_sim();
         let mut game = PirateGame::new(sim.bodies.len());
         let p = sim.ship.position + DVec3::new(0.0, 0.0, -100.0);
-        game.police.push(Police { pos: p, vel: DVec3::ZERO, hp: 1, cooldown: 10.0, kind: PoliceKind::Scout });
+        game.police.push(Police { pos: p, vel: DVec3::ZERO, hp: 1, cooldown: 10.0, kind: PoliceKind::Scout, decision_wait: 0.0, approaching: false, strafe: 1.0 });
         game.shots.push(Shot { pos: p + DVec3::new(0.0, 0.0, 50.0), vel: DVec3::new(0.0, 0.0, -1000.0), ttl: 2.0, player: true, damage: 0.0 });
-        game.update_shots(&mut sim, 0.1);
+        let old_target = sim.ship.position;
+        game.update_shots(&mut sim, 0.1, old_target);
         assert_eq!(game.police_defeated, 1);
         assert!(game.police.is_empty());
     }
@@ -514,17 +706,17 @@ mod tests {
         sim.ship.position = b.position(sim.t) + DVec3::new(0.0, 0.0, b.radius * 2.0);
         game.police_spawn_wait = 0.0;
         game.spawn_police(&sim);
-        assert_eq!(game.police.len(), 2);
+        assert_eq!(game.police.len(), 4);
         assert_ne!(game.police[0].kind, game.police[1].kind);
         game.loot = 3;
         game.police_spawn_wait = 0.0;
         game.spawn_police(&sim);
-        assert_eq!(game.police.len(), 5);
+        assert_eq!(game.police.len(), 7);
         assert!(game.police.iter().any(|p| p.kind == PoliceKind::Heavy));
         assert!(game.police.iter().all(|p| p.hp == p.kind.hp()));
     }
     #[test]
-    fn fifth_unique_trophy_ends_the_game() {
+    fn victory_requires_trophies_and_four_defeats() {
         let mut sim = new_sim();
         let mut game = PirateGame::new(sim.bodies.len());
         assert_eq!(game.goal(&sim), 5);
@@ -537,9 +729,15 @@ mod tests {
             game.treasures[i] = Some(Treasure { local, collected: false });
             let old_pos = sim.ship.position;
             game.update(&mut sim, &mut cam, &Input::default(), true, false, 0.0, old_pos);
-            assert_eq!(game.won(&sim), i == sim.bodies.len() - 1);
+            assert!(!game.won(&sim));
         }
         assert_eq!(game.loot, 5);
+        game.police_defeated = REQUIRED_DEFEATS - 1;
+        assert!(!game.won(&sim));
+        game.police_defeated += 1;
+        assert!(game.won(&sim));
+        sim.kill(DeathCause::Police);
+        assert!(!game.won(&sim));
     }
     #[test]
     fn boarding_then_b_starts_assisted_takeoff() {
@@ -575,9 +773,13 @@ mod tests {
         let mut game = PirateGame::new(sim.bodies.len());
         game.police_spawn_wait = 0.0;
         game.spawn_police(&sim);
-        assert_eq!(game.police.len(), 2);
+        assert_eq!(game.police.len(), 4);
         for enemy in &mut game.police { enemy.cooldown = 0.0; }
-        game.update_police(&sim, 0.0);
+        game.rng = Random(42);
+        for _ in 0..30 {
+            for enemy in &mut game.police { enemy.cooldown = 0.0; }
+            game.update_police(&sim, 0.01);
+        }
         assert!(game.shots.iter().any(|shot| !shot.player));
     }
 }

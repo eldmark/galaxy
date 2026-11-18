@@ -1,8 +1,10 @@
 # Galaxy: sistema solar explorable con renderizador por software
 
-Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Al abrirlo se elige entre jugar y ver el Tour automático. En el juego hay que reunir cinco trofeos, uno por planeta, mientras se combate contra patrullas y se evita el agujero negro del borde. El Tour recorre el sistema sin combate. Todo el dibujo 3D se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib abre la ventana, lee las entradas, presenta el framebuffer como una textura 2D y reproduce los sonidos.
+Proyecto final de Gráficas por Computadora 2026 (entrega 20/11/2026). Al abrirlo se elige entre jugar y ver el Tour automático. En el juego hay que reunir cinco trofeos, uno por planeta, y derribar al menos cuatro patrullas mientras se combate contra la policía y se evita el agujero negro del borde. El Tour recorre el sistema sin combate. Todo el dibujo 3D se calcula en la CPU con un pipeline propio (matrices, recorte, z-buffer, rasterizado por tiles y sombreado diferido). Raylib abre la ventana, lee las entradas, presenta el framebuffer como una textura 2D y reproduce los sonidos.
 
 ![Sistema solar](screenshots/sistema.png)
+
+**Video de la demostración:** <https://youtu.be/rw9yCg45SD4> (recorrido del Tour automático: vuelo espacial, aproximación, órbita, aterrizaje, despegue y alejamiento).
 
 ## Compilar y ejecutar
 
@@ -76,13 +78,13 @@ Tomados de `src/platform.rs` y de la pantalla de ayuda (`F1`, `HELP_ROWS` en `sr
 | `K` / `Supr` | Reaparecer |
 | `1`-`6` | Viajar al cuerpo elegido; `1` es el sol |
 | `P` | Captura PNG en `screenshots/vista-N.png` |
-| `Esc` | Salir |
+| `Esc` | Pausa: congela el juego, muestra esta tabla de controles y los botones `CONTINUAR` y `SALIR DEL JUEGO` (con otra pulsación continúa; en la portada y en la pantalla de victoria sale del programa) |
 
 El Tour de observación no tiene combate, trofeos ni controles de vuelo. En el juego, `WASD` mueve al pirata en tierra, las flechas giran la vista y el botón derecho permite mirar con el ratón. La mirilla central indica la dirección del disparo y el radar inferior izquierdo marca a las patrullas cercanas respecto de la vista.
 
 En crucero no hay un tope de velocidad de juego: el turbo aumenta la aceleración mientras se mantiene pulsado. La simulación solo conserva una cota técnica alta para evitar valores extremos. Cerca del suelo, el turbo permite superar 2 m/s con mayor facilidad sin perder el control local; al soltarlo vuelve el límite de velocidad de descenso.
 
-En órbita o descenso sobre un planeta, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Después de recoger el trofeo, `B` permite abordar cerca de la nave; otra pulsación inicia un ascenso asistido, y `W` ayuda a alejarse. Los cinco planetas admiten aterrizaje; en Siroco se camina sobre una capa de nubes jugable. El HUD muestra cuántos trofeos faltan y al reunir los cinco termina la partida; `Enter` inicia otra. Hay tres naves policiales: exploradora rápida (un impacto), interceptora (dos) y pesada (tres). Al recoger trofeos sube el máximo de patrullas simultáneas de dos a cinco. Se acercan al relieve, disparan en la superficie y también pueden atacar una nave posada. El radar indica dónde están. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
+En órbita o descenso sobre un planeta, `B` activa el aterrizaje asistido y baja automáticamente al pirata cuando la nave se posa. Después de recoger el trofeo, `B` permite abordar cerca de la nave; otra pulsación inicia un ascenso asistido, y `W` ayuda a alejarse. Los cinco planetas admiten aterrizaje; en Siroco se camina sobre una capa de nubes jugable. El HUD muestra los trofeos y las bajas: se gana al reunir los cinco trofeos y derribar cuatro patrullas con vida; `Enter` inicia otra. Hay tres naves policiales: exploradora rápida (un impacto), interceptora (dos) y pesada (tres). Desde la primera oleada hay cuatro patrullas, y cada trofeo aumenta el máximo hasta ocho. Los refuerzos llegan cada 7 a 12 segundos y aparecen también en el espacio. Siempre conocen tu posición, incluso a pie o durante el aterrizaje automático: cada segundo cada patrulla decide con probabilidad de 1/3 acercarse; en los demás casos maniobra de lado, y se retira si está demasiado cerca. Cada 1,25 a 2,1 segundos tiene un 50 % de probabilidad de disparar si estás a menos de 1,2 km. De esos disparos, 2/3 apuntan a tu posición y 1/3 llevan desviación. Las balas viajan a 800 m/s y se pueden esquivar: solo un impacto por barrido segmento-esfera quita vida (8 % exploradora, 11 % interceptora, 15 % pesada); se calcula el movimiento relativo del jugador para detectar cruces entre cuadros. Los planetas bloquean balas con una esfera interior al 98 % del radio nominal. El daño se muestra en el casco y con un destello rojo; llegar a cero destruye la nave. El radar indica dónde están. Si la nave se aleja demasiado del sistema, aparece un agujero negro que la atrae; cruzar el límite destruye la nave y `K` permite reaparecer.
 
 Las teclas `1`-`6` inician un viaje automático al cuerpo elegido (`1` es el sol; llega, orbita una vuelta y devuelve el control). El botón derecho del ratón con arrastre es mirada libre de la cámara (vuelve suave al soltar). `M` o el botón central alterna que el ratón timonee la nave. La nave también se orienta con flechas y `Z`/`C`.
 
@@ -108,6 +110,8 @@ src/world        raster/pipeline.rs (todo el rasterizador)                      
 | HUD | Fuente bitmap y botones dibujados en el framebuffer | `src/hud.rs` |
 | Ventana | Único módulo que usa raylib | `src/platform.rs` |
 
+Los FPS no se dibujan dentro de la imagen del juego: la ventana tiene una **barra de estado propia debajo del framebuffer** (`Platform::set_status` en `src/platform.rs`) con los FPS medidos de verdad (1 / tiempo entre cuadros, limitado a 60 por el vsync), el tiempo real de dibujo de un cuadro con los FPS que alcanzaría sin ese límite, la escala interna y los hilos. Con `GALAXY_PRINT_FPS=1 cargo run --release` se imprime esa misma línea cada segundo por consola. Como la barra queda fuera del framebuffer, tampoco aparece en capturas ni en el video.
+
 El panel `F3` muestra también las hojas y triángulos del terreno, los objetos dibujados o descartados y la escala interna. El HUD se dibuja a 960x540 incluso si el mundo se renderiza a una escala menor.
 
 ## Cumplimiento de los requisitos eliminatorios
@@ -122,7 +126,7 @@ El panel `F3` muestra también las hojas y triángulos del terreno, los objetos 
 | Poder orientar la nave y ver el entorno al acercarse | La nave se orienta con flechas y `Z`/`C`; con el botón derecho del ratón se mira libremente sin cambiar el rumbo (`src/ship/camera.rs`, `CameraRig::update`) |
 | Matrices de modelo, vista y proyección y prueba de profundidad | `body_model_matrix` (modelo), `CameraRig::view_matrix` (vista), `Mat4::perspective` (proyección) y el z-buffer `1/w` de `raster/pipeline.rs`; pruebas en `src/raster/tests.rs` |
 | Al menos un shader de fragmentos propio | Seis shaders en `src/shading/` (sol, Verdalia, Siroco, Mutante, Nix, Fornax) más anillo, nave y cielo |
-| Entrega: código, recursos, instrucciones y video del recorrido | Este README, `assets/`, `scripts/record-demo.sh` y `scripts/video.sh`. `[VIDEO: enlace al mp4 final]` |
+| Entrega: código, recursos, instrucciones y video del recorrido | Este README, `assets/`, `scripts/record-demo.sh` y `scripts/video.sh`. Video: <https://youtu.be/rw9yCg45SD4> |
 
 El video debe mostrar vuelo espacial, acercamiento, vuelta alrededor de un planeta y alejamiento: el Tour hace exactamente esa secuencia (ver `docs/10-guion-demo.md`).
 
@@ -146,7 +150,7 @@ Los contadores de `F3` incluyen llamadas y triángulos del rasterizador, hojas y
 | Gravedad | Hecho | `Body::gravity_at` en `src/world/mod.rs` y `effective_gravity` en `src/ship/physics.rs` | Apagar la asistencia con `X`, acercarse a un planeta con `G` activo y soltar los motores: la trayectoria se curva. Con `G` apagada sigue recta |
 | Colisión | Hecho (contra el relieve) | `sweep_collisions` y `collide` en `src/ship/physics.rs`: barrido del movimiento y nave como esfera de 6 m contra `surface_height_at` | Un contacto suave permite posarse; un impacto por encima de 120 m/s destruye la nave y permite reaparecer |
 | Control local alrededor de un planeta | Hecho | Modos ORBITA y DESCENSO en `update_mode` (`src/ship/physics.rs`) y constantes en `src/ship/modes.rs`; la nave hereda el movimiento del planeta | El HUD (`MODO`) cambia a ORBITA al bajar de 3 radios; el planeta deja de "escaparse" y se puede rodear a baja velocidad |
-| Presentación | Hecho | HUD con modo, planeta cercano, altitud y velocidad, botones del Tour, ayuda (`F1`) y estadísticas (`F3`) en `src/hud.rs` | `F1` y `F3` |
+| Presentación | Hecho | HUD con modo, planeta cercano, altitud y velocidad, ayuda (`F1`), estadísticas (`F3`) y pantalla de pausa con los controles (`Esc`, `draw_pause`) en `src/hud.rs` | `Esc`, `F1` y `F3` |
 
 También funcionan, aunque no están en la lista de puntos: Tour automático y aterrizaje automático (`src/ship/autopilot.rs`), anillo de Siroco como malla propia (`geometry::ring_mesh`) y cielo con cubemap.
 
@@ -225,9 +229,8 @@ El proyecto es individual.
 
 | Integrante | Correo | Contribución |
 |---|---|---|
-| [NOMBRE] | marcoalejandro.diazcastaneda@gmail.com | Todo el proyecto: diseño, integración, revisión del código generado con IA, shaders, simulación, HUD, assets y entrega |
+| Marco Díaz | marcoalejandro.diazcastaneda@gmail.com | Todo el proyecto: diseño, integración, revisión del código generado con IA, shaders, simulación, HUD, assets y entrega |
 
-[PENDIENTE: ajustar la descripción de contribuciones antes de entregar]
 
 ## Documentación del proyecto
 

@@ -5,14 +5,31 @@ use crate::raster::{FragIn, FragmentShader, Uniforms};
 
 pub struct IceShader;
 
+/// Esquinas de ruido reutilizables entre píxeles vecinos (solo memoiza; el resultado no cambia).
+#[derive(Clone, Copy)]
+struct Caches {
+    frost: FbmCache,
+    haze: FbmCache,
+}
+thread_local! {
+    static CACHES: std::cell::RefCell<Caches> =
+        const { std::cell::RefCell::new(Caches { frost: FbmCache::EMPTY, haze: FbmCache::EMPTY }) };
+}
+
 impl FragmentShader for IceShader {
     fn shade(&self, f: &FragIn, u: &Uniforms) -> [f32; 3] {
+        CACHES.with(|c| shade_with(f, u, &mut c.borrow_mut()))
+    }
+}
+
+fn shade_with(f: &FragIn, u: &Uniforms, cc: &mut Caches) -> [f32; 3] {
+    {
         let p = sphere_dir(f.p_local);
         let o = octaves(u.detail);
-        let frost = fbm_n(p.x * 5.0 + 8.0, p.y * 5.0, p.z * 5.0, o);
+        let frost = fbm_c(&mut cc.frost, p.x * 5.0 + 8.0, p.y * 5.0, p.z * 5.0, o);
         let cry = (p.x * 24.0 + frost * 11.0).sin() * (p.y * 21.0 - frost * 8.0).cos();
         let veins = 1.0 - smooth(0.03, 0.18, cry.abs());
-        let haze = fbm_n(p.x * 12.0, p.y * 12.0 + u.time * 0.06, p.z * 12.0, o);
+        let haze = fbm_c(&mut cc.haze, p.x * 12.0, p.y * 12.0 + u.time * 0.06, p.z * 12.0, o);
         let mut c = blend(rgb(32., 38., 102.), rgb(69., 129., 179.), smooth(0.29, 0.6, frost));
         c = blend(c, rgb(172., 218., 231.), smooth(0.48, 0.7, haze));
         c = blend(c, rgb(229., 242., 249.), veins * 0.8);

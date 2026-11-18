@@ -19,23 +19,50 @@ impl Default for RockyShader {
     }
 }
 
-fn clouds(x: f32, y: f32, z: f32, t: f32, o: u32) -> f32 {
-    fbm_n(x * 8.0 + t * 0.24, y * 8.0 + t * 0.07, z * 8.0 - t * 0.17, o)
+fn clouds(c: &mut FbmCache, x: f32, y: f32, z: f32, t: f32, o: u32) -> f32 {
+    fbm_c(c, x * 8.0 + t * 0.24, y * 8.0 + t * 0.07, z * 8.0 - t * 0.17, o)
+}
+
+/// Esquinas de ruido reutilizables entre píxeles vecinos (solo memoiza; el resultado no cambia).
+#[derive(Clone, Copy)]
+struct Caches {
+    continent: FbmCache,
+    det: FbmCache,
+    cloud: FbmCache,
+    shadow: FbmCache,
+    cities: Corners,
+}
+thread_local! {
+    static CACHES: std::cell::RefCell<Caches> = const {
+        std::cell::RefCell::new(Caches {
+            continent: FbmCache::EMPTY,
+            det: FbmCache::EMPTY,
+            cloud: FbmCache::EMPTY,
+            shadow: FbmCache::EMPTY,
+            cities: Corners::EMPTY,
+        })
+    };
 }
 
 impl FragmentShader for RockyShader {
     fn shade(&self, f: &FragIn, u: &Uniforms) -> [f32; 3] {
+        CACHES.with(|c| self.shade_with(f, u, &mut c.borrow_mut()))
+    }
+}
+
+impl RockyShader {
+    fn shade_with(&self, f: &FragIn, u: &Uniforms, cc: &mut Caches) -> [f32; 3] {
         let p = sphere_dir(f.p_local);
         let o = octaves(u.detail);
         let lo = light_local(u);
         let uu = p.x.atan2(p.z) / (2.0 * PI) + 0.5;
         let vv = p.y.clamp(-1.0, 1.0).asin() / PI + 0.5;
-        let continent = fbm_n(p.x * 3.5 + 4.0, p.y * 3.5, p.z * 3.5, o);
+        let continent = fbm_c(&mut cc.continent, p.x * 3.5 + 4.0, p.y * 3.5, p.z * 3.5, o);
         let cells = self.life.sample(uu, vv, u.time);
         let region = continent + if cells { 0.09 } else { -0.04 };
         let land = smooth(0.44, 0.54, region);
         let polar = smooth(0.70, 0.88, p.y.abs());
-        let det = fbm_n(p.x * 15.0, p.y * 15.0, p.z * 15.0, o);
+        let det = fbm_c(&mut cc.det, p.x * 15.0, p.y * 15.0, p.z * 15.0, o);
         let mut c = blend(rgb(7., 35., 68.), rgb(24., 115., 137.), smooth(0.24, 0.68, det));
         c = blend(c, rgb(79., 171., 153.), (1.0 - smooth(0.46, 0.59, region)) * land * 0.7);
         let mut ground = blend(rgb(44., 96., 78.), rgb(178., 144., 87.), smooth(0.36, 0.72, det + p.y.abs() * 0.1));
@@ -61,11 +88,11 @@ impl FragmentShader for RockyShader {
             let hv = (u.light_dir + f.view_dir).normalized();
             c = add_all(c, ground_n.dot(hv).max(0.0).powi(14) * 0.05 * land);
         }
-        let cloud = smooth(0.54, 0.63, clouds(p.x, p.y, p.z, u.time, o));
-        let sh = smooth(0.54, 0.63, clouds(p.x - lo.x * 0.045, p.y - lo.y * 0.045, p.z - lo.z * 0.045, u.time, o));
+        let cloud = smooth(0.54, 0.63, clouds(&mut cc.cloud, p.x, p.y, p.z, u.time, o));
+        let sh = smooth(0.54, 0.63, clouds(&mut cc.shadow, p.x - lo.x * 0.045, p.y - lo.y * 0.045, p.z - lo.z * 0.045, u.time, o));
         c = lit(c, 1.0 - sh * 0.35 * d);
         if u.detail > 0.4 {
-            let cities = noise(p.x * 75.0 + 12.0, p.y * 75.0, p.z * 75.0);
+            let cities = noise_c(&mut cc.cities, p.x * 75.0 + 12.0, p.y * 75.0, p.z * 75.0);
             let settle = smooth(0.71, 0.82, cities) * land * (1.0 - polar);
             c = blend(c, rgb(255., 190., 79.), settle * (1.0 - smooth(0.05, 0.30, d)) * 0.92);
         }

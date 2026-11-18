@@ -159,7 +159,9 @@ impl NormalMap {
     }
 
     pub fn texel(&self, x: i32, y: i32) -> Vec3 {
-        let t = self.data[wrap(y, SIZE as i32) as usize * SIZE + wrap(x, SIZE as i32) as usize];
+        // SIZE es potencia de dos: la máscara equivale a rem_euclid, también con negativos.
+        let m = SIZE as i32 - 1;
+        let t = self.data[(y & m) as usize * SIZE + (x & m) as usize];
         Vec3::new(t[0], t[1], t[2])
     }
 
@@ -170,13 +172,31 @@ impl NormalMap {
             return Vec3::new(0.0, 0.0, 1.0);
         }
         let (x, y) = (u * SIZE as f32 - 0.5, v * SIZE as f32 - 0.5);
-        let (fx, fy) = (x.floor(), y.floor());
-        let (tx, ty) = (x - fx, y - fy);
-        let (ix, iy) = (fx as i32, fy as i32);
-        let a = self.texel(ix, iy).lerp(self.texel(ix + 1, iy), tx);
-        let b = self.texel(ix, iy + 1).lerp(self.texel(ix + 1, iy + 1), tx);
-        let r = a.lerp(b, ty).normalized();
-        if r == Vec3::ZERO { Vec3::new(0.0, 0.0, 1.0) } else { r }
+        let (ix, iy) = (super::noise::ifloor(x), super::noise::ifloor(y));
+        let (tx, ty) = (x - ix as f32, y - iy as f32);
+        // Índices con envoltura calculados una vez (SIZE es potencia de dos).
+        let m = SIZE as i32 - 1;
+        let (x0, x1) = ((ix & m) as usize, (ix.wrapping_add(1) & m) as usize);
+        let (r0, r1) = ((iy & m) as usize * SIZE, (iy.wrapping_add(1) & m) as usize * SIZE);
+        let (t00, t10, t01, t11) = (&self.data[r0 + x0], &self.data[r0 + x1], &self.data[r1 + x0], &self.data[r1 + x1]);
+        let mut o = [0.0f32; 3];
+        for k in 0..3 {
+            let a = t00[k] + (t10[k] - t00[k]) * tx;
+            let b = t01[k] + (t11[k] - t01[k]) * tx;
+            o[k] = a + (b - a) * ty;
+        }
+        // Normalización: la mezcla bilineal de normales casi unitarias tiene |o|² ~ 1, donde la serie de
+        // 1/sqrt es exacta a ~3e-5 y evita sqrt + división; con |o|² bajo se usa la raíz exacta.
+        let l2 = o[0] * o[0] + o[1] * o[1] + o[2] * o[2];
+        let k = if l2 > 0.9 {
+            let e = 1.0 - l2;
+            1.0 + e * (0.5 + e * (0.375 + e * 0.3125))
+        } else if l2 > 1e-24 {
+            1.0 / l2.sqrt()
+        } else {
+            return Vec3::new(0.0, 0.0, 1.0);
+        };
+        Vec3::new(o[0] * k, o[1] * k, o[2] * k)
     }
 }
 
@@ -203,12 +223,21 @@ pub fn layer_weights(distance: f32) -> (f32, f32) {
     (1.0 - smooth(60.0, 320.0, distance), 1.0 - smooth(450.0, 2600.0, distance))
 }
 
+/// Pesos triplanares de la normal `n` (iguales para todas las capas, se calculan una vez).
+#[inline]
+fn triplanar_weights(n: Vec3) -> (f32, f32, f32) {
+    let q = |v: f32| {
+        let s = v * v;
+        s * s
+    };
+    let a = (q(n.x), q(n.y), q(n.z));
+    let sum = (a.0 + a.1 + a.2).max(1e-12);
+    (a.0 / sum, a.1 / sum, a.2 / sum)
+}
+
 /// Una capa triplanar con mezcla whiteout. `n` y `p` en espacio local, `p` en metros.
-fn triplanar(map: &NormalMap, n: Vec3, p: Vec3, tile_m: f32) -> Vec3 {
+fn triplanar(map: &NormalMap, n: Vec3, (wx, wy, wz): (f32, f32, f32), p: Vec3, tile_m: f32) -> Vec3 {
     let inv = 1.0 / tile_m;
-    let a = Vec3::new(n.x.abs().powi(4), n.y.abs().powi(4), n.z.abs().powi(4));
-    let sum = (a.x + a.y + a.z).max(1e-12);
-    let (wx, wy, wz) = (a.x / sum, a.y / sum, a.z / sum);
     let mut out = Vec3::ZERO;
     if wx > 0.02 {
         let t = map.sample(p.z * inv, p.y * inv);
@@ -248,11 +277,12 @@ pub fn perturb_local_with(enabled: bool, map: &NormalMap, f: &FragIn, u: &Unifor
     }
     let p = f.p_local * local_scale(u);
     let mut n = n_local;
+    let w = triplanar_weights(n_local);
     if w1 > 0.01 {
-        n += (triplanar(map, n_local, p, t.tile_m) - n_local) * (w1 * t.strength);
+        n += (triplanar(map, n_local, w, p, t.tile_m) - n_local) * (w1 * t.strength);
     }
     if w2 > 0.01 {
-        n += (triplanar(map, n_local, p, t.tile_m * 8.0) - n_local) * (w2 * t.strength * 0.8);
+        n += (triplanar(map, n_local, w, p, t.tile_m * 8.0) - n_local) * (w2 * t.strength * 0.8);
     }
     let r = n.normalized();
     if r == Vec3::ZERO { n_local } else { r }

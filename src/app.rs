@@ -382,6 +382,8 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
     let (rw, rh) = resolution.dimensions(WIDTH, HEIGHT);
     let mut world_fb = Framebuffer::new(rw, rh);
     let (mut show_stats, mut show_help) = (false, false);
+    // ESC pausa el juego (muestra los controles y los botones CONTINUAR / SALIR).
+    let mut paused = false;
     let mut opts = RenderOptions::default();
     let mut lod_on = true;
     let mut fps = 60.0f32;
@@ -400,11 +402,39 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
     if start_tour {
         sim.start_tour();
     }
+    // Medición REAL (no simulada): FPS = 1 / tiempo de pared entre cuadros (incluye la espera del vsync, así que
+    // no pasa de 60); `render_ms` = lo que cuesta dibujar de verdad un cuadro, de donde sale la capacidad.
+    let (mut real_fps, mut render_ms) = (0.0f32, 0.0f32);
+    let threads = rayon::current_num_threads();
+    // GALAXY_PRINT_FPS=1 imprime por consola la misma línea de la barra de estado (útil para medir sin capturar pantalla).
+    let print_status = std::env::var_os("GALAXY_PRINT_FPS").is_some();
+    let mut last_print = Instant::now();
     while !platform.should_close() {
         let input = platform.poll();
+        let wall = platform.frame_time() as f32;
+        if wall > 1e-4 {
+            real_fps = if real_fps == 0.0 { 1.0 / wall } else { real_fps + (1.0 / wall - real_fps) * 0.08 };
+        }
+        if real_fps > 0.0 {
+            let spare = if render_ms > 0.1 { 1000.0 / render_ms } else { 0.0 };
+            let status = format!(
+                "FPS {:.0}   /   CUADRO {:.1} MS (HASTA {:.0} FPS)   /   ESCALA {:.0}% {}   /   {} HILOS",
+                real_fps, render_ms, spare, resolution.scale() * 100.0, if resolution.automatic { "AUTO" } else { "FIJA" }, threads
+            );
+            if print_status && last_print.elapsed().as_secs_f32() >= 1.0 {
+                println!("{status}");
+                last_print = Instant::now();
+            }
+            platform.set_status(&status, real_fps >= 58.0);
+        }
         if let Some(a) = &audio { a.update(); }
         if input.quit {
-            break;
+            if started && !(play_mode == PlayMode::Game && pirates.won(&sim)) {
+                paused = !paused;
+                platform.set_menu_cursor(paused);
+            } else {
+                break;
+            }
         }
         if !started {
             fb.color.copy_from_slice(menu_background.as_ref().unwrap());
@@ -445,6 +475,8 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
             continue;
         }
         show_help ^= input.toggle_help;
+        // Congelado: ayuda (F1) o pausa (ESC). Nada de simulación, entradas de juego ni combate.
+        let halted = show_help || paused;
         show_stats ^= input.toggle_stats;
         if input.toggle_culling {
             opts.frustum_culling = !opts.frustum_culling;
@@ -462,27 +494,27 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         if input.toggle_assist {
             sim.ship.flight_assist = !sim.ship.flight_assist;
         }
-        if !show_help && input.land_auto && play_mode == PlayMode::Game && !pirates.on_foot() {
+        if !halted && input.land_auto && play_mode == PlayMode::Game && !pirates.on_foot() {
             sim.land_here();
         }
-        if play_mode == PlayMode::Game && !show_help { pirates.handle_board(&mut sim, &mut cam, input.toggle_board); }
-        if let Some(i) = input.select_body.filter(|_| play_mode == PlayMode::Game && !show_help && !pirates.on_foot()) {
+        if play_mode == PlayMode::Game && !halted { pirates.handle_board(&mut sim, &mut cam, input.toggle_board); }
+        if let Some(i) = input.select_body.filter(|_| play_mode == PlayMode::Game && !halted && !pirates.on_foot()) {
             sim.go_to(i);
         }
-        if input.mouse_clicked && play_mode == PlayMode::Game && !show_help && !pirates.on_foot() {
+        if input.mouse_clicked && play_mode == PlayMode::Game && !halted && !pirates.on_foot() {
             if let Some(l) = &layout {
                 if l.land.contains(input.mouse.0, input.mouse.1) {
                     sim.land_here();
                 }
             }
         }
-        let dt = if show_help { 0.0 } else { platform.frame_time().clamp(0.0, 0.1) };
+        let dt = if halted { 0.0 } else { platform.frame_time().clamp(0.0, 0.1) };
         let old_ship_pos = sim.ship.position;
         let idle_input = Input::default();
         let mut ship_input = input.ship;
         if play_mode == PlayMode::Game { pirates.apply_takeoff_input(&mut ship_input); }
-        sim.frame(dt, if show_help || play_mode == PlayMode::Tour || pirates.on_foot() { &idle_input } else { &ship_input });
-        if !show_help {
+        sim.frame(dt, if halted || play_mode == PlayMode::Tour || pirates.on_foot() { &idle_input } else { &ship_input });
+        if !halted {
             if pirates.on_foot() {
                 cam.update_foot(dt, &sim.ship, input.mouse_look.0, input.mouse_look.1, input.ship.rotate);
             } else {
@@ -490,7 +522,7 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
             }
             fx.update(&mut sim, &mut cam, dt, input.toggle_orbits, input.respawn);
         }
-        if play_mode == PlayMode::Game && !show_help {
+        if play_mode == PlayMode::Game && !halted {
             let shots_before = pirates.shots_fired;
             let loot_before = pirates.loot;
             let hull_before = sim.hull;
@@ -499,7 +531,7 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
                 if pirates.shots_fired > shots_before { a.shot(); }
                 if sim.hull < hull_before { a.hit(); }
                 if pirates.loot > loot_before { a.pickup(); }
-                if pirates.won(&sim) && loot_before < pirates.goal(&sim) { a.victory(); }
+                if pirates.won(&sim) { a.victory(); }
             }
         }
         if dt > 1e-4 {
@@ -515,19 +547,31 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
         fx.draw_world(&mut world_fb, &sim, &cam);
         upscale(&world_fb, &mut fb);
 
-        let mut state = hud_state(&sim, &stats, &scene, fps, show_stats, show_help, &opts, lod_on, resolution.scale(), resolution.automatic);
+        let mut state = hud_state(&sim, &stats, &scene, fps, show_stats, show_help && !paused, &opts, lod_on, resolution.scale(), resolution.automatic);
         state.spectator = play_mode == PlayMode::Tour;
         state.tour_available = false;
         layout = Some(draw_hud_layout(&mut fb, &state, input.mouse));
-        if sim.autopilot.active && !show_help {
+        if sim.autopilot.active && !halted {
             crate::hud::draw_nav_panel(&mut fb, sim.autopilot.target_name(&sim.bodies), sim.autopilot.status(), sim.autopilot.eta());
         }
-        if !show_help { fx.draw_hud(&mut fb, &sim); }
-        if play_mode == PlayMode::Game && !show_help {
+        if !halted { fx.draw_hud(&mut fb, &sim); }
+        if play_mode == PlayMode::Game && !halted {
             pirates.draw_hud(&mut fb, &sim, &cam);
             if pirates.won(&sim) { pirates.draw_victory(&mut fb, &sim); }
-        } else if play_mode == PlayMode::Tour && !show_help {
+        } else if play_mode == PlayMode::Tour && !halted {
             crate::hud::draw_text_shadow(&mut fb, 16, HEIGHT as i32 - 49, "TOUR DE OBSERVACION: SIN COMBATE", [130, 224, 255], 1);
+        }
+
+        if paused {
+            let menu = crate::hud::draw_pause(&mut fb, input.mouse);
+            if input.mouse_clicked {
+                if menu.resume.contains(input.mouse.0, input.mouse.1) {
+                    paused = false;
+                    platform.set_menu_cursor(false);
+                } else if menu.quit.contains(input.mouse.0, input.mouse.1) {
+                    break;
+                }
+            }
         }
 
         if input.screenshot {
@@ -539,6 +583,7 @@ pub fn run(start_tour: bool, fixed_scale: Option<f32>) {
             }
         }
         let frame_ms = render_start.elapsed().as_secs_f32() * 1000.0;
+        render_ms = if render_ms == 0.0 { frame_ms } else { render_ms + (frame_ms - render_ms) * 0.08 };
         platform.present(&fb);
         resolution.update(frame_ms, dt as f32);
     }
@@ -551,8 +596,20 @@ pub fn menu_shot(path: &Path, page: MenuPage) -> std::io::Result<()> {
     fb.save_png(path)
 }
 
+/// Captura la pantalla de pausa (ESC) sobre una vista del sistema, sin abrir ventana.
+pub fn pause_shot(path: &Path, hover_resume: bool) -> std::io::Result<()> {
+    let mut fb = crate::shot::system_frame(5.0).0;
+    let mouse = if hover_resume { (700.0, 300.0) } else { (-1.0, -1.0) };
+    crate::hud::draw_pause(&mut fb, mouse);
+    fb.save_png(path)
+}
+
 /// Banco de pruebas sin ventana: el mismo recorrido (Tour) con y sin culling/LOD.
 pub fn bench(frames: u32, fixed_scale: Option<f32>) {
+    // Para medir el costo del mapa de normales: GALAXY_NO_NORMALMAP=1 cargo run --release -- --bench
+    if std::env::var_os("GALAXY_NO_NORMALMAP").is_some() {
+        crate::shading::set_normal_map(false);
+    }
     let resolution = Resolution::new(fixed_scale.or(Some(1.0)));
     let (rw, rh) = resolution.dimensions(WIDTH, HEIGHT);
     println!("Recorrido del Tour: {frames} cuadros a 60 Hz de simulación, {rw}x{rh} ({:.0} %)", resolution.scale() * 100.0);
@@ -568,6 +625,9 @@ pub fn bench(frames: u32, fixed_scale: Option<f32>) {
         let (mut total_ms, mut max_ms) = (0.0f64, 0.0f64);
         let mut peak = (0u32, crate::terrain::TerrainStats::default(), crate::scatter::ScatterStats::default(), Stats::default());
         let (mut tin, mut tdrawn, mut culled) = (0u64, 0u64, 0u64);
+        // Cuadros con terreno activo (dentro de la atmósfera): son los que importan para la fluidez en el suelo.
+        let (mut g_n, mut g_sum, mut g_max, mut g_over) = (0u32, 0.0f64, 0.0f64, 0u32);
+        let mut g_st = [0.0f32; 5]; // cielo, vértices, raster, sombreado, atmósfera
         let (mut m_sky, mut m_v, mut m_r, mut m_s, mut m_a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
         for frame in 0..frames {
             sim.frame(1.0 / 60.0, &Input::default());
@@ -577,6 +637,13 @@ pub fn bench(frames: u32, fixed_scale: Option<f32>) {
             scene.render(&mut fb, &sim, &cam, &opts, on, &mut stats);
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             total_ms += ms;
+            if scene.terrain_triangles > 0 {
+                g_n += 1;
+                g_sum += ms;
+                g_max = g_max.max(ms);
+                if ms > 16.7 { g_over += 1; }
+                g_st[0] += stats.ms_sky; g_st[1] += stats.ms_vertex; g_st[2] += stats.ms_raster; g_st[3] += stats.ms_shade; g_st[4] += stats.ms_atmosphere;
+            }
             if ms > max_ms {
                 max_ms = ms;
                 peak = (frame, scene.terrain_stats.clone(), scene.scatter_stats.clone(), stats.clone());
@@ -600,6 +667,12 @@ pub fn bench(frames: u32, fixed_scale: Option<f32>) {
             tdrawn / n,
             culled / n
         );
+        if g_n > 0 {
+            println!("    en suelo (terreno activo): {g_n} cuadros, {:.2} ms medio, {:.2} ms máx, {g_over} cuadros sobre 16.7 ms ({:.1} %)", g_sum / g_n as f64, g_max, 100.0 * g_over as f64 / g_n as f64);
+            let k = g_n as f32;
+            let known = g_st.iter().sum::<f32>() / k;
+            println!("    suelo, etapas (ms): cielo {:.2}  vértices {:.2}  raster {:.2}  sombreado {:.2}  atmósfera {:.2}  | otros (terreno, objetos, ensamblado) {:.2}", g_st[0] / k, g_st[1] / k, g_st[2] / k, g_st[3] / k, g_st[4] / k, (g_sum / g_n as f64) as f32 - known);
+        }
         let f = frames as f32;
         println!("    etapas (ms/cuadro): cielo {:.2}  vértices {:.2}  raster {:.2}  sombreado {:.2}  atmosfera {:.2}", m_sky / f, m_v / f, m_r / f, m_s / f, m_a / f);
         println!("    pico cuadro {}: terreno {} ch / {} hojas / {} tris, gen {} ({:.2} ms), select {:.2} ms, objetos {} tris / {} horneados, entrada {} tris, vertices {:.2} ms, sombreado {:.2} ms",
