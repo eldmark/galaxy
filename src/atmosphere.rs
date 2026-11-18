@@ -289,16 +289,20 @@ pub fn apply(fb: &mut Framebuffer, view: Mat4, fov_y: f32, eye: crate::math::DVe
         })
         .collect();
     let depth = &fb.depth;
-    // Bloques de 2x2 píxeles: el efecto es suave, así que se evalúa una vez por bloque cuando los cuatro
-    // son fondo o tienen profundidad parecida; si no (bordes de geometría) se evalúa por píxel.
-    fb.color.par_chunks_mut(w * 8).zip(depth.par_chunks(w * 2)).enumerate().for_each(|(by, (rows, drows))| {
+    // Bloques de BLK x BLK píxeles: el efecto es suave, así que se evalúa una vez por bloque cuando TODOS sus
+    // píxeles son fondo o tienen profundidad parecida; si no (bordes de geometría) se evalúa por píxel.
+    // 2 conserva los bordes del horizonte finos; con 4 la atmósfera cuesta menos pero los escalones se notan.
+    const BLK: usize = 2;
+    fb.color.par_chunks_mut(w * 4 * BLK).zip(depth.par_chunks(w * BLK)).enumerate().for_each(|(by, (rows, drows))| {
         let nrows = rows.len() / (w * 4);
-        let mut eval = |rows: &mut [u8], px: usize, py: usize, d: Vec3, geo: f32, count_x: usize, count_y: usize| {
-            let mut acc: Option<[f32; 3]> = None;
+        let eval = |rows: &mut [u8], px: usize, py: usize, d: Vec3, geo: f32, count_x: usize, count_y: usize| {
             // un mismo efecto se aplica a todos los píxeles del bloque, cada uno sobre su propio color
             let mut effects: [Option<Effect>; 4] = [None; 4];
             let mut n = 0;
             for (b, (cos, axis)) in list.iter().zip(&cones) {
+                if n == effects.len() {
+                    break;
+                }
                 if d.dot(*axis) < *cos {
                     continue;
                 }
@@ -307,7 +311,6 @@ pub fn apply(fb: &mut Framebuffer, view: Mat4, fov_y: f32, eye: crate::math::DVe
                     n += 1;
                 }
             }
-            let _ = &mut acc;
             if n == 0 {
                 return;
             }
@@ -331,16 +334,23 @@ pub fn apply(fb: &mut Framebuffer, view: Mat4, fov_y: f32, eye: crate::math::DVe
             let len = ray.length();
             (ray * (1.0 / len), len)
         };
+        let y0 = by * BLK;
         let mut x = 0;
         while x < w {
-            let nx_ = (w - x).min(2);
-            let y0 = by * 2;
-            let ds = [drows[x], if nx_ > 1 { drows[x + 1] } else { drows[x] }, if nrows > 1 { drows[w + x] } else { drows[x] }, if nrows > 1 && nx_ > 1 { drows[w + x + 1] } else { drows[x] }];
-            let (mn, mx) = ds.iter().fold((f32::MAX, 0.0f32), |(a, b), &v| (a.min(v), b.max(v)));
+            let nx_ = (w - x).min(BLK);
+            let (mut mn, mut mx, mut sum) = (f32::MAX, 0.0f32, 0.0f32);
+            for yy in 0..nrows {
+                for xx in 0..nx_ {
+                    let v = drows[yy * w + x + xx];
+                    mn = mn.min(v);
+                    mx = mx.max(v);
+                    sum += v;
+                }
+            }
             let uniform = (mx == 0.0) || (mn > 0.0 && mx < mn * 1.12);
             if uniform {
                 let (d, len) = ray_at(x as f32 + nx_ as f32 * 0.5, y0 as f32 + nrows as f32 * 0.5);
-                let geo = if mx == 0.0 { f32::INFINITY } else { len / (ds.iter().sum::<f32>() * 0.25) };
+                let geo = if mx == 0.0 { f32::INFINITY } else { len / (sum / (nx_ * nrows) as f32) };
                 eval(rows, x, 0, d, geo, nx_, nrows);
             } else {
                 for yy in 0..nrows {
@@ -352,7 +362,7 @@ pub fn apply(fb: &mut Framebuffer, view: Mat4, fov_y: f32, eye: crate::math::DVe
                     }
                 }
             }
-            x += 2;
+            x += BLK;
         }
     });
 }

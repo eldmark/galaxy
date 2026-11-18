@@ -49,6 +49,7 @@ fn main() {
              galaxy --bench [--frames N] [--scale S]     compara con/sin culling y LOD sin ventana\n\
              galaxy --record DIR [--frames N] [--every K]   guarda cuadros del Tour sin ventana\n\
              galaxy --shot out.png [--time T] [--stats]   vista del sistema\n\
+             galaxy --pause-shot out.png   captura la pantalla de pausa (ESC) sin ventana\n\
              galaxy --menu-shot out.png [--tutorial game|tour]   captura portada o tutorial sin ventana\n\
              galaxy --shot-ship out.png [--gear G]   vista de la nave (G 0..1: 0 plegado, 1 desplegado)\n\
              galaxy --atmos-shot out.png --body verdalia --alt 40 [--sun GRADOS] [--az GRADOS] [--space] [--no-normalmap]   atmósfera y mapa de normales\n\
@@ -74,6 +75,10 @@ fn main() {
     }
     if let Some(out) = arg_value(&args, "--shot") {
         shot::system(Path::new(&out), time, has("--stats")).expect("no se pudo guardar el PNG");
+        return;
+    }
+    if let Some(out) = arg_value(&args, "--pause-shot") {
+        app::pause_shot(Path::new(&out), has("--hover")).expect("no se pudo guardar la pausa");
         return;
     }
     if let Some(out) = arg_value(&args, "--menu-shot") {

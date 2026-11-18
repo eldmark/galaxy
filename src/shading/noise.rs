@@ -40,18 +40,79 @@ pub fn hash(x: i32, y: i32, z: i32) -> f32 {
     ((n ^ (n >> 16)) >> 8) as f32 / 16_777_215.0
 }
 
+/// floor rápido (sin llamada a libm) para valores dentro del rango de i32.
+#[inline(always)]
+pub fn ifloor(x: f32) -> i32 {
+    let i = x as i32;
+    i - ((i as f32) > x) as i32
+}
+
+/// Valor del hash entero 3D a partir de los productos por eje ya calculados.
+#[inline(always)]
+fn hash_parts(a: u32, b: u32, c: u32) -> f32 {
+    let mut n = a.wrapping_add(b).wrapping_add(c);
+    n = (n ^ (n >> 13)).wrapping_mul(1_274_126_177);
+    ((n ^ (n >> 16)) >> 8) as f32 * (1.0 / 16_777_215.0)
+}
+
+/// Las 8 esquinas de la celda de ruido (ix, iy, iz). Se pueden reutilizar mientras los puntos
+/// consecutivos caigan en la misma celda (parallax, bump), sin cambiar el resultado.
+#[derive(Clone, Copy)]
+pub struct Corners {
+    ix: i32,
+    iy: i32,
+    iz: i32,
+    v: [f32; 8],
+}
+impl Corners {
+    pub const EMPTY: Corners = Corners { ix: i32::MIN, iy: i32::MIN, iz: i32::MIN, v: [0.0; 8] };
+    #[inline(always)]
+    fn load(&mut self, ix: i32, iy: i32, iz: i32) {
+        // Productos por eje una sola vez (6 multiplicaciones en vez de 24).
+        let xs = [(ix as u32).wrapping_mul(374_761_393), (ix.wrapping_add(1) as u32).wrapping_mul(374_761_393)];
+        let ys = [(iy as u32).wrapping_mul(668_265_263), (iy.wrapping_add(1) as u32).wrapping_mul(668_265_263)];
+        let zs = [(iz as u32).wrapping_mul(2_147_483_647), (iz.wrapping_add(1) as u32).wrapping_mul(2_147_483_647)];
+        self.ix = ix;
+        self.iy = iy;
+        self.iz = iz;
+        for k in 0..8 {
+            // Orden: x0 {y0z0, y1z0, y0z1, y1z1}, luego x1 igual (permite interpolar en x de 4 en 4).
+            self.v[k] = hash_parts(xs[k >> 2], ys[k & 1], zs[(k >> 1) & 1]);
+        }
+    }
+}
+
+/// Ruido de valor 3D suave, en 0..1, reutilizando las esquinas de `c` si el punto cae en su celda.
+#[inline]
+pub fn noise_c(c: &mut Corners, x: f32, y: f32, z: f32) -> f32 {
+    let (ix, iy, iz) = (ifloor(x), ifloor(y), ifloor(z));
+    if c.ix != ix || c.iy != iy || c.iz != iz {
+        c.load(ix, iy, iz);
+    }
+    let (tx, ty, tz) = (x - ix as f32, y - iy as f32, z - iz as f32);
+    let fx = tx * tx * (3.0 - 2.0 * tx);
+    let fy = ty * ty * (3.0 - 2.0 * ty);
+    let fz = tz * tz * (3.0 - 2.0 * tz);
+    let v = &c.v;
+    let mut q = [0.0f32; 4];
+    for k in 0..4 {
+        q[k] = v[k] + (v[k + 4] - v[k]) * fx;
+    }
+    let (a, b) = (q[0] + (q[1] - q[0]) * fy, q[2] + (q[3] - q[2]) * fy);
+    (a + (b - a) * fz).clamp(0.0, 1.0)
+}
+
 /// Ruido de valor 3D suave, en 0..1.
+#[inline]
 pub fn noise(x: f32, y: f32, z: f32) -> f32 {
-    let (fx0, fy0, fz0) = (x.floor(), y.floor(), z.floor());
-    let (ix, iy, iz) = (fx0 as i32, fy0 as i32, fz0 as i32);
-    let fx = smooth(0.0, 1.0, x - fx0);
-    let fy = smooth(0.0, 1.0, y - fy0);
-    let fz = smooth(0.0, 1.0, z - fz0);
-    let a = mix(hash(ix, iy, iz), hash(ix + 1, iy, iz), fx);
-    let b = mix(hash(ix, iy + 1, iz), hash(ix + 1, iy + 1, iz), fx);
-    let c = mix(hash(ix, iy, iz + 1), hash(ix + 1, iy, iz + 1), fx);
-    let d = mix(hash(ix, iy + 1, iz + 1), hash(ix + 1, iy + 1, iz + 1), fx);
-    mix(mix(a, b, fy), mix(c, d, fy), fz).clamp(0.0, 1.0)
+    noise_c(&mut Corners::EMPTY.clone(), x, y, z)
+}
+
+/// Esquinas de las 3 octavas de un fbm, para reutilizarlas entre puntos cercanos.
+#[derive(Clone, Copy)]
+pub struct FbmCache([Corners; 3]);
+impl FbmCache {
+    pub const EMPTY: FbmCache = FbmCache([Corners::EMPTY; 3]);
 }
 
 /// Número de octavas (1..=3) según `detail` (0..1).
@@ -75,6 +136,21 @@ pub fn fbm_n(x: f32, y: f32, z: f32, oct: u32) -> f32 {
     }
     if oct >= 3 {
         s += 0.14 * noise(x * 4.31, y * 4.31, z * 4.31);
+        w += 0.14;
+    }
+    s / w
+}
+/// Igual que `fbm_n` pero reutiliza (y actualiza) las esquinas de `cache`.
+#[inline]
+pub fn fbm_c(cache: &mut FbmCache, x: f32, y: f32, z: f32, oct: u32) -> f32 {
+    let mut s = 0.57 * noise_c(&mut cache.0[0], x, y, z);
+    let mut w = 0.57;
+    if oct >= 2 {
+        s += 0.29 * noise_c(&mut cache.0[1], x * 2.11, y * 2.11, z * 2.11);
+        w += 0.29;
+    }
+    if oct >= 3 {
+        s += 0.14 * noise_c(&mut cache.0[2], x * 4.31, y * 4.31, z * 4.31);
         w += 0.14;
     }
     s / w

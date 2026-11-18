@@ -41,6 +41,10 @@ pub fn run(out: &Path, args: &[String]) {
     let local = spot * (r + alt);
     let mut sim = Sim::new(bodies, body.position(time) + body.fixed_to_world(time, local));
     sim.t = time;
+    // La nave va solidaria con el suelo (como en el juego): sin esto la predicción de `Terrain::warm` busca chunks
+    // donde el planeta habrá girado y la base del terreno nunca queda lista.
+    let rel = sim.ship.position - body.position(time);
+    sim.ship.velocity = body.velocity(time) + body.spin_velocity(rel);
     let up_w = body.fixed_to_world(time, spot).to_f32().normalized();
     // Orientación: +Y de la nave = vertical local; -Z = una tangente cualquiera (más el giro pedido).
     let axis = Vec3::Y.cross(up_w);
@@ -53,13 +57,34 @@ pub fn run(out: &Path, args: &[String]) {
     cam.look_pitch = pitch.to_radians();
 
     let mut scene = Scene::new();
-    let mut fb = Framebuffer::new(WIDTH, HEIGHT);
+    // `--scale S` (p. ej. 0.7) renderiza a esa fracción de 960x540, como la resolución dinámica del juego.
+    let scale: f32 = arg(args, "--scale").and_then(|a| a.parse().ok()).unwrap_or(1.0);
+    let mut fb = Framebuffer::new(((WIDTH as f32 * scale).round() as usize).max(1), ((HEIGHT as f32 * scale).round() as usize).max(1));
     let opts = RenderOptions::default();
     let mut stats = Stats::default();
     // Varios cuadros: el terreno y las mallas de objetos se generan con presupuesto por cuadro.
     for _ in 0..40 {
         stats = Stats::default();
         scene.render(&mut fb, &sim, &cam, &opts, true, &mut stats);
+    }
+    // `--bench-ground`: mide 90 cuadros más en esa misma vista (fluidez a ras de suelo, sin ventana).
+    if args.iter().any(|a| a == "--bench-ground") {
+        let (mut sum, mut max, mut over) = (0.0f64, 0.0f64, 0u32);
+        let mut st = [0.0f32; 5];
+        for _ in 0..90 {
+            stats = Stats::default();
+            let t0 = std::time::Instant::now();
+            scene.render(&mut fb, &sim, &cam, &opts, true, &mut stats);
+            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            sum += ms;
+            max = max.max(ms);
+            if ms > 16.7 { over += 1; }
+            st[0] += stats.ms_sky; st[1] += stats.ms_vertex; st[2] += stats.ms_raster; st[3] += stats.ms_shade; st[4] += stats.ms_atmosphere;
+        }
+        println!(
+            "{} alt {alt} m: {:.2} ms medio, {:.2} ms máx, {over}/90 sobre 16.7 ms | cielo {:.2} vértices {:.2} raster {:.2} sombreado {:.2} atmósfera {:.2} | terreno {} tris, dibujados {}",
+            body.name, sum / 90.0, max, st[0] / 90.0, st[1] / 90.0, st[2] / 90.0, st[3] / 90.0, st[4] / 90.0, scene.terrain_triangles, stats.triangles_drawn
+        );
     }
     let s = &scene.scatter_stats;
     println!(

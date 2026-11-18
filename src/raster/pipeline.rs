@@ -39,6 +39,8 @@ struct CallData {
     /// `true` si el modelo invierte la orientación (determinante negativo).
     flip: bool,
     verts: Vec<VOut>,
+    /// Descartada por el frustum culling (no entra en el ensamblado).
+    culled: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -352,24 +354,25 @@ pub(super) fn render(
     let planes = frustum_planes(&proj);
     let inv_view = invert_rigid(&view);
 
-    // (1) frustum culling por esfera + (2) etapa de vértices
-    let mut cdata: Vec<CallData> = Vec::with_capacity(calls.len());
-    for call in calls {
-        let mesh = call.mesh;
-        let mv = view * call.model;
-        let empty = mesh.indices.len() < 3 || mesh.vertices.is_empty();
-        let mut visible = !empty;
-        if visible && opts.frustum_culling && mesh.bounds_radius > 0.0 {
-            let c = mv.transform_point(mesh.bounds_center);
-            visible = sphere_visible(&planes, c, mesh.bounds_radius * max_scale(&call.model));
-        }
-        if !visible {
-            stats.draw_calls_culled += 1;
-            cdata.push(CallData { mv, flip: false, verts: Vec::new() });
-            continue;
-        }
-        let (nm, sign) = normal_matrix(&call.model);
-        let transform = |v: &crate::geometry::Vertex| {
+    // (1) frustum culling por esfera + (2) etapa de vértices.
+    // Se paraleliza POR LLAMADA de dibujo: el terreno llega como cientos de mallas pequeñas (357 vértices) y
+    // paralelizar solo dentro de cada malla dejaba todo el trabajo en un hilo. `collect` conserva el orden.
+    let cdata: Vec<CallData> = calls
+        .par_iter()
+        .map(|call| {
+            let mesh = call.mesh;
+            let mv = view * call.model;
+            let empty = mesh.indices.len() < 3 || mesh.vertices.is_empty();
+            let mut visible = !empty;
+            if visible && opts.frustum_culling && mesh.bounds_radius > 0.0 {
+                let c = mv.transform_point(mesh.bounds_center);
+                visible = sphere_visible(&planes, c, mesh.bounds_radius * max_scale(&call.model));
+            }
+            if !visible {
+                return CallData { mv, flip: false, verts: Vec::new(), culled: true };
+            }
+            let (nm, sign) = normal_matrix(&call.model);
+            let transform = |v: &crate::geometry::Vertex| {
                 let pv = mv.transform_point(v.position);
                 let clip = proj.transform_point4(pv);
                 let n = v.normal;
@@ -380,78 +383,83 @@ pub(super) fn render(
                 ) * sign;
                 VOut { clip, normal: n.normalized() }
             };
-        let verts: Vec<VOut> = if mesh.vertices.len() >= 4096 {
-            mesh.vertices.par_iter().map(transform).collect()
-        } else {
-            mesh.vertices.iter().map(transform).collect()
-        };
-        cdata.push(CallData { mv, flip: sign < 0.0, verts });
-    }
+            let verts: Vec<VOut> = if mesh.vertices.len() >= 4096 {
+                mesh.vertices.par_iter().map(transform).collect()
+            } else {
+                mesh.vertices.iter().map(transform).collect()
+            };
+            CallData { mv, flip: sign < 0.0, verts, culled: false }
+        })
+        .collect();
+    stats.draw_calls_culled += cdata.iter().filter(|c| c.culled).count() as u32;
 
-    // (3) ensamblado, recorte near, backface
-    let mut tris: Vec<Tri> = Vec::new();
+    // (3) ensamblado, recorte near, backface. Todos los bloques de triángulos de TODAS las llamadas se reparten
+    // entre los hilos a la vez; el orden (llamada, bloque) se conserva para que el resultado sea determinista.
+    let cull_back = opts.backface_culling;
+    let mut jobs: Vec<(usize, usize)> = Vec::new();
     for (ci, call) in calls.iter().enumerate() {
-        let cd = &cdata[ci];
-        if cd.verts.is_empty() {
+        if cdata[ci].verts.is_empty() {
             continue;
         }
-        let mesh = call.mesh;
-        let ntri = mesh.indices.len() / 3;
+        let ntri = call.mesh.indices.len() / 3;
         stats.triangles_in += ntri as u64;
-        let nchunks = ntri.div_ceil(CHUNK);
-        let cull_back = opts.backface_culling;
-        let process_chunk = |chunk: usize| {
-                let mut out = Vec::new();
-                let mut cnt = [0u64; 3]; // backface, clipped_out, drawn
-                for t in chunk * CHUNK..((chunk + 1) * CHUNK).min(ntri) {
-                    let i = [
-                        mesh.indices[3 * t] as usize,
-                        mesh.indices[3 * t + 1] as usize,
-                        mesh.indices[3 * t + 2] as usize,
-                    ];
-                    let c = [cd.verts[i[0]].clip, cd.verts[i[1]].clip, cd.verts[i[2]].clip];
-                    if outcode(&c[0]) & outcode(&c[1]) & outcode(&c[2]) != 0 {
-                        cnt[1] += 1;
-                        continue;
-                    }
-                    let (poly, n) = if c.iter().any(|v| v[2] + v[3] < 0.0) {
-                        clip_near(&c)
-                    } else {
-                        let e = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-                        ([(c[0], e[0]), (c[1], e[1]), (c[2], e[2]), ([0.0; 4], [0.0; 3])], 3)
-                    };
-                    let (mut drawn, mut back) = (false, false);
-                    for k in 1..n.saturating_sub(1) {
-                        match setup([&poly[0], &poly[k], &poly[k + 1]], ci as u32, t as u32, cd.flip, cull_back, w, h) {
-                            Setup::Drawn(tr) => {
-                                out.push(tr);
-                                drawn = true;
-                            }
-                            Setup::Back => back = true,
-                            Setup::Out => {}
-                        }
-                    }
-                    if drawn {
-                        cnt[2] += 1;
-                    } else if back {
-                        cnt[0] += 1;
-                    } else {
-                        cnt[1] += 1;
-                    }
-                }
-                (out, cnt)
+        jobs.extend((0..ntri.div_ceil(CHUNK)).map(|chunk| (ci, chunk)));
+    }
+    let process_chunk = |&(ci, chunk): &(usize, usize)| {
+        let cd = &cdata[ci];
+        let mesh = calls[ci].mesh;
+        let ntri = mesh.indices.len() / 3;
+        let mut out = Vec::new();
+        let mut cnt = [0u64; 3]; // backface, clipped_out, drawn
+        for t in chunk * CHUNK..((chunk + 1) * CHUNK).min(ntri) {
+            let i = [
+                mesh.indices[3 * t] as usize,
+                mesh.indices[3 * t + 1] as usize,
+                mesh.indices[3 * t + 2] as usize,
+            ];
+            let c = [cd.verts[i[0]].clip, cd.verts[i[1]].clip, cd.verts[i[2]].clip];
+            if outcode(&c[0]) & outcode(&c[1]) & outcode(&c[2]) != 0 {
+                cnt[1] += 1;
+                continue;
+            }
+            let (poly, n) = if c.iter().any(|v| v[2] + v[3] < 0.0) {
+                clip_near(&c)
+            } else {
+                let e = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+                ([(c[0], e[0]), (c[1], e[1]), (c[2], e[2]), ([0.0; 4], [0.0; 3])], 3)
             };
-        let parts: Vec<(Vec<Tri>, [u64; 3])> = if nchunks >= 4 {
-            (0..nchunks).into_par_iter().map(process_chunk).collect()
-        } else {
-            (0..nchunks).map(process_chunk).collect()
-        };
-        for (v, cnt) in parts {
-            stats.triangles_backface += cnt[0];
-            stats.triangles_clipped_out += cnt[1];
-            stats.triangles_drawn += cnt[2];
-            tris.extend(v);
+            let (mut drawn, mut back) = (false, false);
+            for k in 1..n.saturating_sub(1) {
+                match setup([&poly[0], &poly[k], &poly[k + 1]], ci as u32, t as u32, cd.flip, cull_back, w, h) {
+                    Setup::Drawn(tr) => {
+                        out.push(tr);
+                        drawn = true;
+                    }
+                    Setup::Back => back = true,
+                    Setup::Out => {}
+                }
+            }
+            if drawn {
+                cnt[2] += 1;
+            } else if back {
+                cnt[0] += 1;
+            } else {
+                cnt[1] += 1;
+            }
         }
+        (out, cnt)
+    };
+    let parts: Vec<(Vec<Tri>, [u64; 3])> = if jobs.len() >= 4 {
+        jobs.par_iter().map(process_chunk).collect()
+    } else {
+        jobs.iter().map(process_chunk).collect()
+    };
+    let mut tris: Vec<Tri> = Vec::with_capacity(parts.iter().map(|p| p.0.len()).sum());
+    for (v, cnt) in parts {
+        stats.triangles_backface += cnt[0];
+        stats.triangles_clipped_out += cnt[1];
+        stats.triangles_drawn += cnt[2];
+        tris.extend(v);
     }
     stats.ms_vertex += t_vertex.elapsed().as_secs_f32() * 1000.0;
 

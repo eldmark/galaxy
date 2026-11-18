@@ -304,6 +304,29 @@ pub struct MenuLayout { pub game: Rect, pub tour: Rect, pub continue_button: Rec
 pub fn draw_start_screen(fb: &mut Framebuffer, page: MenuPage, mouse: (f32, f32)) -> MenuLayout {
     let w = fb.width as i32;
     let h = fb.height as i32;
+    if page == MenuPage::Select {
+        // La captura completa queda libre en el centro: los seis cuerpos son visibles.
+        for y in 0..h {
+            let alpha = if y < 135 { ((135 - y) as f32 / 135.0 * 180.0) as u8 }
+                else if y > h - 170 { ((y - (h - 170)) as f32 / 170.0 * 240.0) as u8 }
+                else { 0 };
+            if alpha > 0 { fill_rect(fb, Rect { x: 0, y, w, h: 1 }, [1, 5, 15], alpha); }
+        }
+        let center = |fb: &mut Framebuffer, text: &str, y, scale, color| {
+            draw_text_shadow(fb, (w - text_width(text, scale)) / 2, y, text, color, scale);
+        };
+        center(fb, "PIRATAS DE LA GALAXIA", 34, 4, COL_ACCENT);
+        center(fb, "CINCO MUNDOS. UN BOTIN. TODA LA POLICIA TRAS DE TI.", 91, 1, COL_TEXT);
+        center(fb, "EXPLORA EL SISTEMA. SOBREVIVE A LA PERSECUCION.", h - 178, 1, COL_DIM);
+        let bw = 350.min((w - 64) / 2);
+        let game = Rect { x: w / 2 - bw - 12, y: h - 135, w: bw, h: 48 };
+        let tour = Rect { x: w / 2 + 12, y: h - 135, w: bw, h: 48 };
+        draw_button(fb, game, "JUGAR [1 / ENTER]", game.contains(mouse.0, mouse.1), true);
+        draw_button(fb, tour, "EXPLORAR / TOUR [2]", tour.contains(mouse.0, mouse.1), false);
+        center(fb, "5 TROFEOS + 4 PATRULLAS DERRIBADAS PARA GANAR", h - 65, 1, COL_TEXT);
+        center(fb, "4 A 8 ENEMIGOS EN EL RADAR   /   ESC SALIR", h - 35, 1, COL_DIM);
+        return MenuLayout { game, tour, continue_button: game };
+    }
     fill_rect(fb, Rect { x: 0, y: 0, w, h }, [1, 5, 15], 145);
     let pw = 640.min(w - 20);
     let ph = 350.min(h - 20);
@@ -316,21 +339,16 @@ pub fn draw_start_screen(fb: &mut Framebuffer, page: MenuPage, mouse: (f32, f32)
     let tour = Rect { x: w / 2 - 180, y: r.y + 204, w: 360, h: 42 };
     let continue_button = Rect { x: w / 2 - 180, y: r.y + 264, w: 360, h: 42 };
     match page {
-        MenuPage::Select => {
-            center(fb, "PIRATAS DE LA GALAXIA", r.y + 27, 3, COL_ACCENT);
-            center(fb, "UN SISTEMA PARA EXPLORAR", r.y + 83, 2, COL_TEXT);
-            draw_button(fb, game, "JUGAR: 5 TROFEOS [1]", game.contains(mouse.0, mouse.1), false);
-            draw_button(fb, tour, "TOUR: SOLO VER [2]", tour.contains(mouse.0, mouse.1), false);
-            center(fb, "ELIGE UN MODO PARA VER SUS CONTROLES", r.y + 277, 1, COL_DIM);
-        }
+        MenuPage::Select => unreachable!(),
         MenuPage::GameTutorial => {
             center(fb, "COMO JUGAR", r.y + 22, 3, COL_ACCENT);
-            center(fb, "REUNE UN TROFEO EN CADA PLANETA: 0/5", r.y + 75, 2, COL_TEXT);
+            center(fb, "5 TROFEOS + DERRIBAR 4 PATRULLAS", r.y + 75, 2, COL_TEXT);
             center(fb, "WASD VOLAR/CAMINAR  SHIFT TURBO", r.y + 111, 2, COL_TEXT);
             center(fb, "L ATERRIZAR  B BAJAR/ABORDAR", r.y + 138, 2, COL_TEXT);
             center(fb, "TRAS ABORDAR, B DESPEGA", r.y + 165, 2, COL_TEXT);
             center(fb, "E TROFEO  ESPACIO DISPARAR", r.y + 192, 2, COL_TEXT);
-            center(fb, "MIRILLA AL CENTRO  RADAR A LA IZQUIERDA", r.y + 219, 1, COL_TEXT);
+            center(fb, "TE RASTREAN SIEMPRE: 1/3 DE ACERCARSE CADA SEGUNDO", r.y + 219, 1, COL_TEXT);
+            center(fb, "EVITA LAS BALAS ROJAS: LOS IMPACTOS QUITAN VIDA", r.y + 238, 1, COL_WARN);
             draw_button(fb, continue_button, "EMPEZAR JUEGO [ENTER]", continue_button.contains(mouse.0, mouse.1), true);
         }
         MenuPage::TourTutorial => {
@@ -372,10 +390,8 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
         draw_text_shadow(fb, 16 + 80, y, v, *c, 2);
     }
 
-    // FPS (arriba a la derecha) y estado de culling/LOD.
-    let fps = format!("{:.0} FPS", state.fps);
-    let fw = text_width(&fps, 2);
-    draw_text_shadow(fb, w - fw - 10, 10, &fps, if state.fps >= 30.0 { COL_GOOD } else { COL_WARN }, 2);
+    // Estado de culling/LOD (arriba a la derecha). Los FPS NO se dibujan aquí: se miden en `app::run` y se
+    // muestran en la barra de estado de la ventana (`Platform::set_status`), fuera del framebuffer.
     let flags = format!(
         "CULLING {} [F4]   LOD {} [F5]",
         if state.culling_on { "ON" } else { "OFF" },
@@ -385,7 +401,7 @@ pub fn draw_hud_layout(fb: &mut Framebuffer, state: &HudState, mouse: (f32, f32)
     draw_text_shadow(fb, w - flw - 10, 30, &flags, COL_DIM, 1);
     let scale = format!("ESCALA {:.0}% {} [F6]", state.scale * 100.0, if state.scale_auto { "AUTO" } else { "FIJA" });
     draw_text_shadow(fb, w - text_width(&scale, 1) - 10, 42, &scale, COL_DIM, 1);
-    let hint = "F1 AYUDA  F3 STATS";
+    let hint = "ESC PAUSA  F1 AYUDA  F3 STATS";
     draw_text_shadow(fb, w - text_width(hint, 1) - 10, 54, hint, COL_DIM, 1);
 
     // Botones (abajo, centrados).
@@ -509,16 +525,11 @@ pub const HELP_ROWS: [(&str, &str); 24] = [
     ("F6", "Escala auto / 100%"),
     ("N", "Mapa de normales on/off"),
     ("P", "Captura de pantalla"),
-    ("ESC", "Salir"),
+    ("ESC", "Pausa / continuar"),
 ];
 
-fn draw_help(fb: &mut Framebuffer) {
-    let w = fb.width as i32;
-    let h = fb.height as i32;
-    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [2, 5, 12], 190);
-    let pw = 520.min(w - 16);
-    let ph = 56 + HELP_ROWS.len() as i32 * 18 + 24;
-    let r = Rect { x: (w - pw) / 2, y: ((h - ph) / 2).max(4), w: pw, h: ph };
+/// Panel con la tabla de controles (`HELP_ROWS`) dentro de `r`.
+fn controls_panel(fb: &mut Framebuffer, r: Rect, footer: &str) {
     panel(fb, r);
     draw_text_shadow(fb, r.x + 16, r.y + 14, "CONTROLES", COL_ACCENT, 3);
     for (i, (k, d)) in HELP_ROWS.iter().enumerate() {
@@ -526,7 +537,60 @@ fn draw_help(fb: &mut Framebuffer) {
         draw_text_shadow(fb, r.x + 16, y, k, COL_ACCENT, 2);
         draw_text_shadow(fb, r.x + 16 + 13 * 12, y, d, COL_TEXT, 2);
     }
-    draw_text_shadow(fb, r.x + 16, r.y + r.h - 22, "F1 PARA CERRAR", COL_DIM, 1);
+    draw_text_shadow(fb, r.x + 16, r.y + r.h - 22, footer, COL_DIM, 1);
+}
+
+fn controls_height() -> i32 {
+    56 + HELP_ROWS.len() as i32 * 18 + 24
+}
+
+fn draw_help(fb: &mut Framebuffer) {
+    let w = fb.width as i32;
+    let h = fb.height as i32;
+    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [2, 5, 12], 190);
+    let pw = 520.min(w - 16);
+    let ph = controls_height();
+    let r = Rect { x: (w - pw) / 2, y: ((h - ph) / 2).max(4), w: pw, h: ph };
+    controls_panel(fb, r, "F1 PARA CERRAR");
+}
+
+/// Botones de la pantalla de pausa.
+pub struct PauseLayout {
+    pub resume: Rect,
+    pub quit: Rect,
+}
+
+/// Pantalla de pausa (tecla `ESC`): oscurece el juego, muestra los controles y los botones CONTINUAR y SALIR.
+pub fn draw_pause(fb: &mut Framebuffer, mouse: (f32, f32)) -> PauseLayout {
+    let w = fb.width as i32;
+    let h = fb.height as i32;
+    fill_rect(fb, Rect { x: 0, y: 0, w, h }, [2, 5, 12], 200);
+    // Controles a la izquierda; título y botones a la derecha.
+    let cw = 560.min(w * 3 / 5);
+    let ch = controls_height();
+    let controls = Rect { x: 24.min(w / 20), y: ((h - ch) / 2).max(4), w: cw, h: ch };
+    controls_panel(fb, controls, "ESC PARA CONTINUAR");
+
+    let rx = controls.x + controls.w + 24;
+    let side = Rect { x: rx, y: controls.y, w: (w - rx - 24).max(0), h: ch };
+    panel(fb, side);
+    let cx = side.x + side.w / 2;
+    let title = "PAUSA";
+    draw_text_shadow(fb, cx - text_width(title, 5) / 2, side.y + 28, title, COL_ACCENT, 5);
+    let sub = "JUEGO DETENIDO";
+    draw_text_shadow(fb, cx - text_width(sub, 2) / 2, side.y + 82, sub, COL_DIM, 2);
+
+    let bw = (side.w - 40).max(0);
+    let resume = Rect { x: side.x + 20, y: side.y + 140, w: bw, h: 48 };
+    let quit = Rect { x: side.x + 20, y: side.y + 204, w: bw, h: 48 };
+    draw_button(fb, resume, "CONTINUAR [ESC]", resume.contains(mouse.0, mouse.1), true);
+    draw_button(fb, quit, "SALIR DEL JUEGO", quit.contains(mouse.0, mouse.1), false);
+
+    let tips = ["F3 DATOS DE RENDIMIENTO", "F4 CULLING   F5 LOD", "F6 ESCALA AUTOMATICA", "N MAPA DE NORMALES"];
+    for (i, t) in tips.iter().enumerate() {
+        draw_text_shadow(fb, side.x + 20, side.y + 282 + i as i32 * 16, t, COL_DIM, 1);
+    }
+    PauseLayout { resume, quit }
 }
 
 // ---------------------------------------------------------------- HUD de vuelo (órbita, calor, aterrizaje, muerte)
@@ -708,6 +772,22 @@ mod tests {
         assert!(lit_bbox(&fb, 0).is_some());
         let mut tiny = Framebuffer::new(10, 10);
         draw_nav_panel(&mut tiny, "X", "Y", 1.0);
+    }
+
+    #[test]
+    fn pause_screen_has_clickable_buttons_and_shows_controls() {
+        let mut fb = Framebuffer::new(960, 540);
+        let l = draw_pause(&mut fb, (-1.0, -1.0));
+        for r in [l.resume, l.quit] {
+            assert!(r.x >= 0 && r.y >= 0 && r.x + r.w <= 960 && r.y + r.h <= 540, "botón fuera de pantalla: {r:?}");
+            assert!(r.w > 100 && r.h >= 40);
+        }
+        assert!(l.resume.y + l.resume.h < l.quit.y, "los botones no deben solaparse");
+        assert!(l.resume.contains((l.resume.x + 5) as f32, (l.resume.y + 5) as f32));
+        assert!(HELP_ROWS.iter().any(|(k, d)| *k == "ESC" && d.to_lowercase().contains("pausa")));
+        // no entra en pánico con framebuffers diminutos
+        let mut tiny = Framebuffer::new(12, 8);
+        draw_pause(&mut tiny, (3.0, 3.0));
     }
 
     #[test]

@@ -44,9 +44,11 @@ pub fn system_frame(time: f32) -> (Framebuffer, Stats) {
     let mut x = 0.0f32;
     let mut centers = Vec::new();
     for b in &bodies {
-        x += b.radius as f32 * 1.35;
+        // Reservar el ancho de los anillos evita que oculten al último planeta.
+        let extent = b.radius as f32 * if b.name == "Siroco" { 2.25 } else { 1.35 };
+        x += extent;
         centers.push(x);
-        x += b.radius as f32 * 1.35;
+        x += extent;
     }
     let total = x;
     let eye = Vec3::new(total * 0.5, total * 0.16, total * 0.62);

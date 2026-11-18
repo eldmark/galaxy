@@ -4,3 +4,4 @@ target/
 frames/
 perf.data*
 .claude/
+videos/
